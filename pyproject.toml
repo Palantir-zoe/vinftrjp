@@ -1,0 +1,137 @@
+[project]
+name = "VINFTRJP"
+version = "0.1.0"
+description = "Source code repository for the ICML 2026 paper: A Novel Framework using Variational Inference with Normalizing Flows to Train Transport Reversible Jump Proposals."
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Anonymous", email = "anonymous@gmail.com"},
+]
+maintainers = [
+    {name = "Anonymous", email = "anonymous@gmail.com"},
+]
+readme = "README.md"
+keywords = ["Python", "MCMC", "RJMCMC", "VINF", "Transport Reversible Jump Proposals"]
+classifiers = [
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "dirichlet>=1.0.0",
+    "kdepy>=1.1.12",
+    "matplotlib>=3.10.6",
+    "nflows>=0.14",
+    "numba>=0.62.0",
+    "ott-jax>=0.5.1",
+    "scikit-learn>=1.7.2",
+    "seaborn>=0.13.2",
+    "torch>=2.8.0",
+    "pymc>=5.25.1",
+    "pytensor>=2.31.7",
+    "scipy>=1.12.0",
+    "numpy<2.0.0",
+    "normflows>=1.7.3",
+    "gputil>=1.4.0",
+    "psutil>=7.1.3",
+    "dill>=0.4.0",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+enableReachabilityAnalysis = false
+reportGeneralTypeIssues = "none"
+reportMissingImports = "none"
+reportUnreachable = false
+reportCallIssue = false
+reportArgumentType = false
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+exclude = [".venv"]
+extend-exclude = ["tests"]
+
+[tool.ruff.lint]
+extend-select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "D",   # pydocstyle (docstring conventions)
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "YTT", # flake8-2020
+    "ANN", # flake8-annotations
+    "S",   # flake8-bandit
+    "B",   # flake8-bugbear
+    "A",   # flake8-builtins
+    "C4",  # flake8-comprehensions
+    "RUF", # Ruff-specific rules
+    "BLE", # flake8-blind-except
+]
+
+ignore = [
+    "ANN001",  # Missing type annotation of function argument
+    "ANN002",  # Missing type annotation for `*args`
+    "ANN003",  # Missing type annotation for `**kwargs`
+    "ANN201",  # Missing return type of public function
+    "ANN202",  # Missing return type of private function
+    "ANN204",  # Missing return type annotation for special method `__init__`
+    "ANN205",  # Missing return type annotation for staticmethod
+    "ANN206",  # Missing return type annotation for classmethod
+    "D101",  # Missing docstring in public class
+    "D102",  # Missing docstring in public method
+    "D103",  # Missing docstring in public function
+    "D104",  # Missing docstring in public package
+    "D107",  # Missing docstring in `__init__`
+    "D100",  # Missing docstring in public module
+    "D200",  # One-line docstring should fit on one line
+    "D204",  # 1 blank line required after class docstring
+    "D205",  # 1 blank line required between summary line and description
+    "D400",  # First line should end with a period
+    "D401",  # First line of docstring should be imperative mood
+    "D403",  # First word of docstring should be capitalized
+    "D404",  # First word of docstring shuold not be `This`
+    "D417",  # Missing argument description in the docstring
+    "N802",  # Function name should be lowercase
+    "RUF002",  # Docstring contains ambiguous `–` (EN-DASH)
+    "RUF022",  # `__all__` is not sorted
+    "S101",  # Use of `assert` detected
+    "N803",  # Argument name should be lowercase
+    "N806",  # Variable in function should be lowercase
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[tool.black]
+line-length = 120
+skip-magic-trailing-comma = true
+
+[tool.isort]
+line_length = 120
+profile = "black"
+include_trailing_comma = true
+
+[tool.pytest]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
