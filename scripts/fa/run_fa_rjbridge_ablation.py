@@ -85,12 +85,12 @@ if __name__ == "__main__":
     ALGORITHMS = [f"FactorAnalysisModel{algo}" for algo in ["VINF"]]
 
     args = setup_argparse()
-    for run_no in range(args.start, args.end):
+    for run_no in range(args.start, args.end + 1):
         for n_particles in NPARTICLES:
             for prob in PROBLEMS:
                 ablations = generate_ablations(run_no, n_particles)
 
-                train_theta, test_theta = get_train_theta_test_theta(folder, run_no, n_particles, prob)
+                train_theta, test_theta = get_train_theta_test_theta(folder, run_no, prob, n_particles)
 
                 algorithm_based_run_with_fixed_resources(
                     run_rjbridge_algorithm_based_ablation,

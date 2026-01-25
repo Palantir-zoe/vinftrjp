@@ -84,7 +84,7 @@ if __name__ == "__main__":
     ALGORITHMS = [f"RobustBlockVSModel{algo}" for algo in ["IndivVINF"]]
 
     args = setup_argparse()
-    for run_no in range(args.start, args.end):
+    for run_no in range(args.start, args.end + 1):
         for n_particles in NPARTICLES:
             for prob in PROBLEMS:
                 train_theta, test_theta = get_train_theta_test_theta(

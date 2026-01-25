@@ -90,7 +90,7 @@ if __name__ == "__main__":
             for prob in PROBLEMS:
                 ablations = generate_ablations(run_no, n_particles)
 
-                train_theta, start_theta = get_train_theta_start_theta(folder, run_no, n_particles, prob)
+                train_theta, start_theta = get_train_theta_start_theta(folder, run_no, prob, n_particles)
 
                 algorithm_based_run_with_fixed_resources(
                     run_rjmcmc_algorithm_based_ablation,
