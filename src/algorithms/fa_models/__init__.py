@@ -6,6 +6,7 @@ __all__ = [
     "FactorAnalysisModelLW",
     "FactorAnalysisModelNF",
     "FactorAnalysisModelVINF",
+    "FactorAnalysisModelVINFRF",
 ]
 
 from .fa_model import FactorAnalysisModel
@@ -14,4 +15,5 @@ from .fa_models import (
     FactorAnalysisModelLW,
     FactorAnalysisModelNF,
     FactorAnalysisModelVINF,
+    FactorAnalysisModelVINFRF,
 )

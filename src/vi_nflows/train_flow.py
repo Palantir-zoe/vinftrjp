@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import numpy as np
 import torch
 from normflows.flows import (
@@ -173,6 +175,8 @@ class TrainNormalizingFlowBase:
         ValueError
             If target distribution does not provide dimensionality information.
         """
+        self.target = target
+
         # Get latent dimension from target distribution
         if target is not None and hasattr(target, "ndim"):  # Check if target has 'ndim' attribute
             latent_size = target.ndim
@@ -318,7 +322,7 @@ class TrainNormalizingFlowBase:
             Trained normalizing flow model.
         """
         # Training state variables
-        best_loss = float("inf")  # Initialize with infinity
+        best_loss = float("inf")  # Best evaluation loss at beta=1
         best_state = None  # Store best model parameters
         patience_counter = 0
 
@@ -328,7 +332,17 @@ class TrainNormalizingFlowBase:
             optimizer.zero_grad()  # Reset gradients
 
             try:
-                model, beta, loss = self._train_model(model, it)
+                model, beta, train_loss = self._train_model(model, it)
+
+                if not torch.isfinite(train_loss):
+                    optimizer.zero_grad(set_to_none=True)
+                    if best_state is not None:
+                        model.load_state_dict(best_state)
+                    self._shrink_learning_rate(optimizer)
+                    patience_counter += 1
+                    if self.verbose:
+                        print(f"Iteration {it}: Invalid training loss - reverted to best checkpoint and reduced lr")
+                    continue
 
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=self.clip_grad_max_norm)
 
@@ -338,25 +352,48 @@ class TrainNormalizingFlowBase:
                 # Update parameters only if gradients are numerically valid
                 if not invalid_grad:
                     optimizer.step()
-                    scheduler.step(loss.detach().item())
                 elif self.verbose:
-                    print(f"Iteration {it}: Invalid gradient detected - update skipped")
+                    optimizer.zero_grad(set_to_none=True)
+                    if best_state is not None:
+                        model.load_state_dict(best_state)
+                    self._shrink_learning_rate(optimizer)
+                    print(f"Iteration {it}: Invalid gradient detected - reverted to best checkpoint and reduced lr")
+                    patience_counter += 1
+                    continue
 
-                # Extract loss value
-                loss_val = loss.item()
+                train_loss_val = train_loss.item()
+                eval_beta1_loss = self._evaluate_model_beta1(model)
 
-                # Save best model and update loss
+                if not np.isfinite(eval_beta1_loss):
+                    if best_state is not None:
+                        model.load_state_dict(best_state)
+                    self._shrink_learning_rate(optimizer)
+                    patience_counter += 1
+                    if self.verbose:
+                        print(f"Iteration {it}: Invalid eval_beta1_loss - reverted to best checkpoint and reduced lr")
+                    continue
+
+                scheduler.step(eval_beta1_loss)
+
+                # Save best model using only the beta=1 evaluation loss
                 patience_counter, best_loss, best_state = self._save_model_update_loss(
-                    model, loss_val, best_loss, best_state, patience_counter, it
+                    model, eval_beta1_loss, best_loss, best_state, patience_counter, it
                 )
 
-                # Update progress bar with current loss and beta
+                # Update progress bar with annealed train loss and beta=1 eval loss
                 if self.verbose:
-                    pbar.set_postfix({"loss": f"{loss_val:.4f}", "best": f"{best_loss:.4f}", "beta": f"{beta:.3f}"})
+                    pbar.set_postfix(
+                        {
+                            "train_loss": f"{train_loss_val:.4f}",
+                            "eval_beta1_loss": f"{eval_beta1_loss:.4f}",
+                            "best": f"{best_loss:.4f}",
+                            "beta": f"{beta:.3f}",
+                        }
+                    )
 
                 # Early stopping
                 if patience_counter >= self.patience:
-                    print(f"Early stopping at loss: {best_loss}")
+                    print(f"Early stopping at eval_beta1_loss: {best_loss}")
                     break
 
             except (RuntimeError, ValueError) as e:
@@ -372,11 +409,21 @@ class TrainNormalizingFlowBase:
 
         # Print final training summary
         if self.verbose:
-            print(f"Training completed. Best loss: {best_loss:.6f}")
+            print(f"Training completed. Best eval_beta1_loss: {best_loss:.6f}")
 
         return model
 
     def _train_model(self, model, it):
+        raise NotImplementedError
+
+    def _evaluate_model_beta1(self, model):
+        with torch.no_grad():
+            eval_loss = self._compute_eval_loss_beta1(model)
+        if isinstance(eval_loss, torch.Tensor):
+            eval_loss = eval_loss.item()
+        return float(eval_loss)
+
+    def _compute_eval_loss_beta1(self, model):
         raise NotImplementedError
 
     def _compute_annealing_beta(self, iteration):
@@ -401,13 +448,17 @@ class TrainNormalizingFlowBase:
                     return True
         return False
 
+    def _shrink_learning_rate(self, optimizer, factor=0.5, min_lr=1e-6):
+        for group in optimizer.param_groups:
+            group["lr"] = max(min_lr, group["lr"] * factor)
+
     def _save_model_update_loss(self, model, loss_val, best_loss, best_state, patience_counter, iteration):
         # Save best model if current loss improves and is numerically valid
         if not (np.isnan(loss_val) or np.isinf(loss_val)):
             threshold = min(self.improvement_threshold, self.improvement_threshold * abs(best_loss))
             if loss_val < best_loss - threshold:
                 best_loss = loss_val
-                best_state = model.state_dict()
+                best_state = deepcopy(model.state_dict())
                 if self.save_path:
                     torch.save(best_state, self.save_path)
 
@@ -544,8 +595,12 @@ class TrainNormalizingFlow(TrainNormalizingFlowBase):
 
         # Compute reverse KL divergence loss
         loss = model.reverse_kld(num_samples=self.num_samples, beta=beta)
-        loss.backward()  # Backpropagate gradients
+        if torch.isfinite(loss):
+            loss.backward()  # Backpropagate gradients
         return model, beta, loss
+
+    def _compute_eval_loss_beta1(self, model):
+        return model.reverse_kld(num_samples=self.num_samples, beta=1.0)
 
 
 class TrainConditionalNormalizingFlow(TrainNormalizingFlow):
@@ -558,8 +613,9 @@ class TrainConditionalNormalizingFlow(TrainNormalizingFlow):
             # RealNVP: Non-volume preserving flow with coupling layers
             # MLP networks for scale and translation transformations
             # [z_masked, context]
-            scale_nn = MLP([latent_size + latent_size - 1, self.hidden_layer_size, latent_size], init_zeros=True)
-            translation_nn = MLP([latent_size + latent_size - 1, self.hidden_layer_size, latent_size], init_zeros=True)
+            context_dim = getattr(target, "context_dim", latent_size - 1)
+            scale_nn = MLP([latent_size + context_dim, self.hidden_layer_size, latent_size], init_zeros=True)
+            translation_nn = MLP([latent_size + context_dim, self.hidden_layer_size, latent_size], init_zeros=True)
 
             # Alternate mask pattern for consecutive layers
             current_mask = binary_mask if index_flow % 2 == 0 else 1 - binary_mask
@@ -585,10 +641,18 @@ class TrainConditionalNormalizingFlow(TrainNormalizingFlow):
 
         # Compute reverse KL divergence loss
         loss = model.reverse_kld(num_samples=self.num_samples, beta=beta, context=context)
-        loss.backward()  # Backpropagate gradients
+        if torch.isfinite(loss):
+            loss.backward()  # Backpropagate gradients
         return model, beta, loss
 
+    def _compute_eval_loss_beta1(self, model):
+        context = self._generate_random_context(self.num_samples)
+        return model.reverse_kld(num_samples=self.num_samples, beta=1.0, context=context)
+
     def _generate_random_context(self, batch_size: int):
+        if hasattr(self.target, "sample_context"):
+            return self.target.sample_context(batch_size, device=self.device)
+
         masks = torch.tensor([[1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]])
         context = masks[torch.randint(0, len(masks), (batch_size,))].float()
         return context.to(self.device)

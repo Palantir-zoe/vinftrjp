@@ -37,6 +37,16 @@ uv run scripts/plot.py --end=10
 
 This will run experiments from run 1 to run 10 inclusively.
 
+### Change-Point Example
+
+To run the coal-mining disasters change-point example with the collapsed conditional shared CTP proposal:
+
+```bash
+uv run -m scripts.change_point.run_change_point_rjmcmc --samples 40000 --k-max 10
+```
+
+The default implementation partially collapses the segment intensities, trains a single conditional shared flow on the saturated change-point space, and then runs RJMCMC with exact collapsed RJ correction. To compare against independent model-specific collapsed flows, add `--independent-flows`.
+
 ## Project Structure
 
 The first-level folder structure of this library VINFTRJP is presented below:

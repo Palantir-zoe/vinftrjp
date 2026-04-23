@@ -107,6 +107,83 @@ class RJFlowGlobalFactorAnalysisProposalVINF(RJFlowGlobalFactorAnalysisProposal)
         return self.deconcatParameters(XX.detach().numpy(), inputs, mk), logdet.detach().numpy()
 
 
+class RJFlowGlobalFactorAnalysisProposalVINFRejectionFree(RJFlowGlobalFactorAnalysisProposalVINF):
+    def __init__(self, normalizing_flows, problem, posterior_model_probabilities, **kwargs):
+        self.posterior_model_probabilities = posterior_model_probabilities
+        super().__init__(normalizing_flows, problem, **kwargs)
+
+    def _get_model_log_probs(self):
+        mklist = self.pmodel.getModelKeys()
+        if self.posterior_model_probabilities is None:
+            raise ValueError("posterior_model_probabilities must be provided for rejection-free FA proposal.")
+
+        probs = np.zeros(len(mklist), dtype=np.float64)
+        for i, mk in enumerate(mklist):
+            probs[i] = float(self.posterior_model_probabilities.get(mk, 0.0))
+
+        if np.any(probs < 0):
+            raise ValueError(f"posterior_model_probabilities must be non-negative, got {self.posterior_model_probabilities}")
+        if not np.any(probs > 0):
+            raise ValueError(f"posterior_model_probabilities assign zero mass to all models: {self.posterior_model_probabilities}")
+
+        probs = probs / probs.sum()
+        return mklist, np.log(probs)
+
+    def _sample_model_conditional(self, mk, size):
+        flow = self.flows[mk]
+        samples, log_q = flow.sample(size)
+        x = np.asarray(samples.detach().cpu().tolist(), dtype=np.float64)
+        log_q = np.asarray(log_q.detach().cpu().tolist(), dtype=np.float64)
+
+        theta = np.zeros((size, self.pmodel.dim()), dtype=np.float64)
+        k_col = self.pmodel.generateRVIndices()[self.indicator_name][0]
+        theta[:, k_col] = mk[0]
+        theta = self.deconcatParameters(x, theta, mk)
+        theta = self.pmodel.sanitise(theta)
+        return theta, log_q
+
+    def _eval_model_conditional_log_prob(self, theta, mk):
+        if self.getModelDim(mk) == 0:
+            return np.zeros(theta.shape[0], dtype=np.float64)
+        x = self.concatParameters(theta, mk)
+        log_q = self.flows[mk].log_prob(torch.tensor(x, dtype=torch.float32))
+        return np.asarray(log_q.detach().cpu().tolist(), dtype=np.float64)
+
+    def draw(self, theta, size=1):
+        prop_theta = np.zeros_like(theta)
+        logpqratio = np.zeros(theta.shape[0], dtype=np.float64)
+        prop_ids = np.full(theta.shape[0], id(self))
+
+        mklist, mk_log_probs = self._get_model_log_probs()
+        mk_to_index = {mk: i for i, mk in enumerate(mklist)}
+        mk_probs = np.exp(mk_log_probs)
+
+        model_enumeration, _ = self.pmodel.enumerateModels(theta)
+        for mk, mk_row_idx in model_enumeration.items():
+            mk_theta = theta[mk_row_idx]
+            cur_log_q_model = mk_log_probs[mk_to_index[mk]]
+            cur_log_q_param = self._eval_model_conditional_log_prob(mk_theta, mk)
+
+            pidx = np.random.choice(np.arange(len(mklist)), p=mk_probs, size=mk_theta.shape[0])
+
+            for p_i in np.unique(pidx):
+                at_idx = pidx == p_i
+                new_mk = mklist[p_i]
+                tn = int(at_idx.sum())
+
+                prop_block, prop_log_q_param = self._sample_model_conditional(new_mk, tn)
+                prop_theta[mk_row_idx[at_idx]] = prop_block
+
+                logpqratio[mk_row_idx[at_idx]] = (
+                    cur_log_q_model
+                    + cur_log_q_param[at_idx]
+                    - mk_log_probs[p_i]
+                    - prop_log_q_param
+                )
+
+        return prop_theta, logpqratio, prop_ids
+
+
 class FARWProposal(Proposal):
     def __init__(self, problem, *, betaii_names, betaij_names, lambda_names, **kwargs):
         self.problem = problem

@@ -45,7 +45,7 @@ class DiagGaussian(BaseDistribution):
             self.register_buffer("log_scale", torch.zeros(1, *self.shape))
         self.temperature = None  # Temperature parameter for annealed sampling
 
-    def forward(self, num_samples=1):
+    def forward(self, num_samples=1, context=None):
         """
         Sample from the distribution and compute log probabilities.
 
@@ -70,7 +70,7 @@ class DiagGaussian(BaseDistribution):
         )
         return z, log_p
 
-    def log_prob(self, z):
+    def log_prob(self, z, context=None):
         """
         Compute log probability of given samples.
 
@@ -145,7 +145,7 @@ class DiagStudentT(BaseDistribution):
             self.register_buffer("loc", torch.squeeze(initial_loc))
             self.register_buffer("log_scale", initial_log_scales)
 
-    def forward(self, num_samples=1):
+    def forward(self, num_samples=1, context=None):
         """
         Sample from the distribution and compute log probabilities.
 
@@ -168,7 +168,7 @@ class DiagStudentT(BaseDistribution):
 
         return z, log_p
 
-    def log_prob(self, z):
+    def log_prob(self, z, context=None):
         """
         Compute log probability of given samples.
 

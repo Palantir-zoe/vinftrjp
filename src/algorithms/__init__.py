@@ -1,8 +1,10 @@
 __all__ = [
+    "ChangePointModelVINF",
     "FactorAnalysisModelAF",
     "FactorAnalysisModelLW",
     "FactorAnalysisModelNF",
     "FactorAnalysisModelVINF",
+    "FactorAnalysisModelVINFRF",
     "ToyModelAF",
     "ToyModelNF",
     "ToyModelPerfect",
@@ -16,11 +18,13 @@ __all__ = [
     "RobustBlockVSModelVINF",
 ]
 
+from .change_point_models import ChangePointModelVINF
 from .fa_models import (
     FactorAnalysisModelAF,
     FactorAnalysisModelLW,
     FactorAnalysisModelNF,
     FactorAnalysisModelVINF,
+    FactorAnalysisModelVINFRF,
 )
 from .toy_models import ToyModelAF, ToyModelNF, ToyModelPerfect, ToyModelVINF
 from .vs_models import (
@@ -34,10 +38,12 @@ from .vs_models import (
 )
 
 ALGORITHMS = {
+    "ChangePointModelVINF": ChangePointModelVINF,
     "FactorAnalysisModelAF": FactorAnalysisModelAF,
     "FactorAnalysisModelLW": FactorAnalysisModelLW,
     "FactorAnalysisModelNF": FactorAnalysisModelNF,
     "FactorAnalysisModelVINF": FactorAnalysisModelVINF,
+    "FactorAnalysisModelVINFRF": FactorAnalysisModelVINFRF,
     "ToyModelAF": ToyModelAF,
     "ToyModelNF": ToyModelNF,
     "ToyModelPerfect": ToyModelPerfect,

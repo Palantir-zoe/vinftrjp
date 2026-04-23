@@ -6,6 +6,7 @@ from .fa_proposals import (
     RJFlowGlobalFactorAnalysisProposalAF,
     RJFlowGlobalFactorAnalysisProposalNF,
     RJFlowGlobalFactorAnalysisProposalVINF,
+    RJFlowGlobalFactorAnalysisProposalVINFRejectionFree,
     RJGlobalFactorAnalysisProposalLW,
 )
 
@@ -130,6 +131,45 @@ class FactorAnalysisModelVINF(FactorAnalysisModel):
             )
 
             proposal = SystematicChoiceProposal([rjp, trwmep])
+        else:
+            proposal = trwmep
+
+        return proposal
+
+
+class FactorAnalysisModelVINFRF(FactorAnalysisModel):
+    def __init__(self, *, normalizing_flows, problem, y_data, **kwargs):
+        self.normalizing_flows = normalizing_flows
+        super().__init__(problem, y_data, **kwargs)
+
+    def _setup_proposal(self, k_min, k_max, **kwargs):
+        posterior_model_probabilities = kwargs.pop(
+            "posterior_model_probabilities",
+            {
+                (1,): 0.88,
+                (2,): 0.12,
+            },
+        )
+        transformedrwprop = FARWProposal(
+            problem=self.problem,
+            betaii_names=self.betaii_names,
+            betaij_names=self.betaij_names,
+            lambda_names=self.lambda_names,
+            **kwargs,
+        )
+        trwmep = ModelEnumerateProposal(subproposal=transformedrwprop)
+        if k_min < k_max:
+            proposal = RJFlowGlobalFactorAnalysisProposalVINFRejectionFree(
+                normalizing_flows=self.normalizing_flows,
+                problem=self.problem,
+                indicator_name="k",
+                betaii_names=self.betaii_names,
+                betaij_names=self.betaij_names,
+                lambda_names=self.lambda_names,
+                within_model_proposal=trwmep,
+                posterior_model_probabilities=posterior_model_probabilities,
+                **kwargs,
+            )
         else:
             proposal = trwmep
 
