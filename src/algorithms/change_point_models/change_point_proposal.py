@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from scipy.special import logsumexp
+from scipy.stats import beta as beta_distribution
 from scipy.stats import multivariate_normal, norm
 
 from src.proposals import Proposal
@@ -102,6 +103,8 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
         aux_scale=1.0,
         save_flows_dir="",
         use_conditional_shared_flow=True,
+        between_model_move="ctp",
+        split_beta=2.0,
         **kwargs,
     ):
         self.normalizing_flows = normalizing_flows
@@ -117,6 +120,13 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
         self.aux_scale = aux_scale
         self.save_flows_dir = save_flows_dir
         self.use_conditional_shared_flow = use_conditional_shared_flow
+        self.between_model_move = between_model_move
+        self.split_beta = float(split_beta)
+        if self.between_model_move not in {"ctp", "latent", "semantic"}:
+            raise ValueError(
+                "between_model_move must be one of {'ctp', 'latent', 'semantic'}, "
+                f"got {self.between_model_move}"
+            )
 
         self.rv_names = self.segment_names + [self.indicator_name]
 
@@ -295,6 +305,140 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
     def _drop_death_coordinate(self, x):
         return x[:, :-1].copy(), x[:, -1].copy()
 
+    def _logsigmoid_np(self, x):
+        return -np.logaddexp(0.0, -x)
+
+    def _raw_to_log_weights(self, x):
+        x = np.asarray(x, dtype=np.float64)
+        n, k = x.shape
+        if k == 0:
+            return np.zeros((n, 1), dtype=np.float64)
+
+        offsets = (k + 1) - np.arange(1, k + 1, dtype=np.float64)
+        logits = x - np.log(offsets)
+        log_z = self._logsigmoid_np(logits)
+        log_one_minus_z = self._logsigmoid_np(-logits)
+        prefix = np.cumsum(log_one_minus_z, axis=1)
+        prev_prefix = np.column_stack([np.zeros(n, dtype=np.float64), prefix[:, :-1]])
+        return np.column_stack([prev_prefix + log_z, prefix[:, -1]])
+
+    def _raw_to_weights(self, x):
+        log_weights = self._raw_to_log_weights(x)
+        log_weights = log_weights - log_weights.max(axis=1, keepdims=True)
+        weights = np.exp(log_weights)
+        weights = weights / weights.sum(axis=1, keepdims=True)
+        return np.clip(weights, 1e-300, 1.0)
+
+    def _weights_to_raw(self, weights):
+        weights = np.asarray(weights, dtype=np.float64)
+        n, dim = weights.shape
+        k = dim - 1
+        if k == 0:
+            return np.zeros((n, 0), dtype=np.float64)
+
+        weights = np.clip(weights, 1e-300, 1.0)
+        weights = weights / weights.sum(axis=1, keepdims=True)
+        raw = np.zeros((n, k), dtype=np.float64)
+        remaining = np.ones(n, dtype=np.float64)
+        offsets = (k + 1) - np.arange(1, k + 1, dtype=np.float64)
+
+        for i in range(k):
+            z = np.clip(weights[:, i] / remaining, 1e-12, 1.0 - 1e-12)
+            raw[:, i] = np.log(z) - np.log1p(-z) + np.log(offsets[i])
+            remaining = np.clip(remaining - weights[:, i], 1e-300, 1.0)
+
+        return raw
+
+    def _raw_to_weight_logdet(self, x):
+        x = np.asarray(x, dtype=np.float64)
+        n, k = x.shape
+        if k == 0:
+            return np.zeros(n, dtype=np.float64)
+
+        offsets = (k + 1) - np.arange(1, k + 1, dtype=np.float64)
+        logits = x - np.log(offsets)
+        log_weights = self._raw_to_log_weights(x)
+        return (-logits + self._logsigmoid_np(logits) + log_weights[:, :-1]).sum(axis=1)
+
+    def _split_selection_log_prob(self, weights, split_idx):
+        return np.log(np.clip(weights[np.arange(weights.shape[0]), split_idx], 1e-300, 1.0))
+
+    def _merge_selection_log_prob(self, k, n):
+        return np.full(n, -np.log(k), dtype=np.float64)
+
+    def _semantic_birth(self, block_theta, mk, new_mk):
+        k = int(mk[0])
+        n = block_theta.shape[0]
+        x = self.concatParameters(block_theta, mk)
+        weights = self._raw_to_weights(x)
+
+        split_idx = np.zeros(n, dtype=int)
+        for row in range(n):
+            split_idx[row] = np.random.choice(np.arange(k + 1), p=weights[row] / weights[row].sum())
+
+        rho = beta_distribution(self.split_beta, self.split_beta).rvs(n)
+        rho = np.clip(np.asarray(rho, dtype=np.float64), 1e-12, 1.0 - 1e-12)
+
+        new_weights = np.zeros((n, k + 2), dtype=np.float64)
+        split_weight = weights[np.arange(n), split_idx]
+
+        for row in range(n):
+            j = int(split_idx[row])
+            new_weights[row, :j] = weights[row, :j]
+            new_weights[row, j] = rho[row] * weights[row, j]
+            new_weights[row, j + 1] = (1.0 - rho[row]) * weights[row, j]
+            new_weights[row, j + 2 :] = weights[row, j + 1 :]
+
+        new_x = self._weights_to_raw(new_weights)
+        prop_theta = self.setVariable(block_theta.copy(), self.indicator_name, np.full(n, int(new_mk[0])))
+        prop_theta = self.deconcatParameters(new_x, prop_theta, new_mk)
+
+        log_jac = (
+            np.log(np.clip(split_weight, 1e-300, 1.0))
+            + self._raw_to_weight_logdet(x)
+            - self._raw_to_weight_logdet(new_x)
+        )
+        log_forward_select = self._split_selection_log_prob(weights, split_idx)
+        log_forward_aux = beta_distribution(self.split_beta, self.split_beta).logpdf(rho)
+        log_reverse_select = self._merge_selection_log_prob(int(new_mk[0]), n)
+        logpqratio = log_reverse_select - log_forward_select - log_forward_aux + log_jac
+        return prop_theta, logpqratio
+
+    def _semantic_death(self, block_theta, mk, new_mk):
+        k = int(mk[0])
+        n = block_theta.shape[0]
+        x = self.concatParameters(block_theta, mk)
+        weights = self._raw_to_weights(x)
+
+        merge_idx = np.random.randint(k, size=n)
+        new_weights = np.zeros((n, k), dtype=np.float64)
+        merged_weight = np.zeros(n, dtype=np.float64)
+        rho = np.zeros(n, dtype=np.float64)
+
+        for row in range(n):
+            j = int(merge_idx[row])
+            merged_weight[row] = weights[row, j] + weights[row, j + 1]
+            rho[row] = weights[row, j] / merged_weight[row]
+            new_weights[row, :j] = weights[row, :j]
+            new_weights[row, j] = merged_weight[row]
+            new_weights[row, j + 1 :] = weights[row, j + 2 :]
+
+        rho = np.clip(rho, 1e-12, 1.0 - 1e-12)
+        new_x = self._weights_to_raw(new_weights)
+        prop_theta = self.setVariable(block_theta.copy(), self.indicator_name, np.full(n, int(new_mk[0])))
+        prop_theta = self.deconcatParameters(new_x, prop_theta, new_mk)
+
+        log_birth_jac = (
+            np.log(np.clip(merged_weight, 1e-300, 1.0))
+            + self._raw_to_weight_logdet(new_x)
+            - self._raw_to_weight_logdet(x)
+        )
+        log_forward_select = self._merge_selection_log_prob(k, n)
+        log_reverse_select = self._split_selection_log_prob(new_weights, merge_idx)
+        log_reverse_aux = beta_distribution(self.split_beta, self.split_beta).logpdf(rho)
+        logpqratio = log_reverse_select + log_reverse_aux - log_forward_select - log_birth_jac
+        return prop_theta, logpqratio
+
     def draw(self, theta, size=1):
         prop_theta = theta.copy()
         logpqratio = np.zeros(theta.shape[0])
@@ -320,56 +464,84 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
                 ) = self.within_model_proposal.draw(mk_theta[within_idx], within_idx.sum())
 
             if jump_idx.any():
-                if self.use_conditional_shared_flow:
-                    jump_x, logdet_to_base, forward_aux_log_prob = self._transform_to_base_matrix(
-                        mk_theta[jump_idx], mk
-                    )
+                if self.between_model_move == "semantic":
+                    jump_distribution = self._jump_distribution(k)
+                    choices = np.array(list(jump_distribution.keys()), dtype=int)
+                    probs = np.array(list(jump_distribution.values()), dtype=float)
+                    proposed_k = np.random.choice(choices, p=probs, size=jump_idx.sum())
+
+                    jump_logpq = np.zeros(jump_idx.sum())
+                    jump_prop_theta = mk_theta[jump_idx].copy()
+
+                    for new_k in np.unique(proposed_k):
+                        local_idx = proposed_k == new_k
+                        new_mk = (int(new_k),)
+                        block_theta = mk_theta[jump_idx][local_idx].copy()
+
+                        if new_k == k + 1:
+                            prop_jump, local_logpq = self._semantic_birth(block_theta, mk, new_mk)
+                        elif new_k == k - 1:
+                            prop_jump, local_logpq = self._semantic_death(block_theta, mk, new_mk)
+                        else:
+                            raise ValueError(f"Unsupported jump from {k} to {new_k}")
+
+                        jump_prop_theta[local_idx] = prop_jump
+                        jump_logpq[local_idx] = local_logpq + self._model_log_ratio(k, int(new_k))
+
+                    prop_mk_theta[jump_idx] = jump_prop_theta
+                    mk_logpq[jump_idx] = jump_logpq
+
                 else:
-                    jump_x, logdet_to_base = self._transform_to_base_matrix(mk_theta[jump_idx], mk)
-                    forward_aux_log_prob = np.zeros(jump_idx.sum(), dtype=np.float64)
-                jump_distribution = self._jump_distribution(k)
-                choices = np.array(list(jump_distribution.keys()), dtype=int)
-                probs = np.array(list(jump_distribution.values()), dtype=float)
-                proposed_k = np.random.choice(choices, p=probs, size=jump_idx.sum())
-
-                jump_logpq = np.zeros(jump_idx.sum())
-                jump_prop_theta = mk_theta[jump_idx].copy()
-
-                for new_k in np.unique(proposed_k):
-                    local_idx = proposed_k == new_k
-                    new_mk = (int(new_k),)
-                    tn = local_idx.sum()
-
-                    block_x = jump_x[local_idx].copy()
-                    block_theta = mk_theta[jump_idx][local_idx].copy()
-
                     if self.use_conditional_shared_flow:
-                        block_theta = self.setVariable(block_theta, self.indicator_name, np.full(tn, new_k))
-                        prop_jump, logdet_from_base, reverse_aux_log_prob = self._transform_from_base_matrix(
-                            block_x, block_theta, new_mk
+                        jump_x, logdet_to_base, forward_aux_log_prob = self._transform_to_base_matrix(
+                            mk_theta[jump_idx], mk
                         )
-                        jump_logpq[local_idx] += reverse_aux_log_prob - forward_aux_log_prob[local_idx]
-                    elif new_k == k + 1:
-                        aux = norm(0, self.aux_scale).rvs(tn)
-                        prop_x = self._append_birth_coordinate(block_x, aux)
-                        block_theta = self.setVariable(block_theta, self.indicator_name, np.full(tn, new_k))
-                        prop_concat, logdet_from_base = self._transform_from_base_matrix(prop_x, block_theta, new_mk)
-                        prop_jump = self.deconcatParameters(prop_concat, block_theta, new_mk)
-                        jump_logpq[local_idx] -= norm(0, self.aux_scale).logpdf(aux)
-                    elif new_k == k - 1:
-                        prop_x, removed = self._drop_death_coordinate(block_x)
-                        block_theta = self.setVariable(block_theta, self.indicator_name, np.full(tn, new_k))
-                        prop_concat, logdet_from_base = self._transform_from_base_matrix(prop_x, block_theta, new_mk)
-                        prop_jump = self.deconcatParameters(prop_concat, block_theta, new_mk)
-                        jump_logpq[local_idx] += norm(0, self.aux_scale).logpdf(removed)
                     else:
-                        raise ValueError(f"Unsupported jump from {k} to {new_k}")
+                        jump_x, logdet_to_base = self._transform_to_base_matrix(mk_theta[jump_idx], mk)
+                        forward_aux_log_prob = np.zeros(jump_idx.sum(), dtype=np.float64)
+                    jump_distribution = self._jump_distribution(k)
+                    choices = np.array(list(jump_distribution.keys()), dtype=int)
+                    probs = np.array(list(jump_distribution.values()), dtype=float)
+                    proposed_k = np.random.choice(choices, p=probs, size=jump_idx.sum())
 
-                    jump_prop_theta[local_idx] = prop_jump
-                    jump_logpq[local_idx] += self._model_log_ratio(k, int(new_k)) + logdet_from_base
+                    jump_logpq = np.zeros(jump_idx.sum())
+                    jump_prop_theta = mk_theta[jump_idx].copy()
 
-                prop_mk_theta[jump_idx] = jump_prop_theta
-                mk_logpq[jump_idx] = jump_logpq + logdet_to_base
+                    for new_k in np.unique(proposed_k):
+                        local_idx = proposed_k == new_k
+                        new_mk = (int(new_k),)
+                        tn = local_idx.sum()
+
+                        block_x = jump_x[local_idx].copy()
+                        block_theta = mk_theta[jump_idx][local_idx].copy()
+
+                        if self.use_conditional_shared_flow:
+                            block_theta = self.setVariable(block_theta, self.indicator_name, np.full(tn, new_k))
+                            prop_jump, logdet_from_base, reverse_aux_log_prob = self._transform_from_base_matrix(
+                                block_x, block_theta, new_mk
+                            )
+                            jump_logpq[local_idx] += reverse_aux_log_prob - forward_aux_log_prob[local_idx]
+                        elif new_k == k + 1:
+                            aux = norm(0, self.aux_scale).rvs(tn)
+                            prop_x = self._append_birth_coordinate(block_x, aux)
+                            block_theta = self.setVariable(block_theta, self.indicator_name, np.full(tn, new_k))
+                            prop_concat, logdet_from_base = self._transform_from_base_matrix(prop_x, block_theta, new_mk)
+                            prop_jump = self.deconcatParameters(prop_concat, block_theta, new_mk)
+                            jump_logpq[local_idx] -= norm(0, self.aux_scale).logpdf(aux)
+                        elif new_k == k - 1:
+                            prop_x, removed = self._drop_death_coordinate(block_x)
+                            block_theta = self.setVariable(block_theta, self.indicator_name, np.full(tn, new_k))
+                            prop_concat, logdet_from_base = self._transform_from_base_matrix(prop_x, block_theta, new_mk)
+                            prop_jump = self.deconcatParameters(prop_concat, block_theta, new_mk)
+                            jump_logpq[local_idx] += norm(0, self.aux_scale).logpdf(removed)
+                        else:
+                            raise ValueError(f"Unsupported jump from {k} to {new_k}")
+
+                        jump_prop_theta[local_idx] = prop_jump
+                        jump_logpq[local_idx] += self._model_log_ratio(k, int(new_k)) + logdet_from_base
+
+                    prop_mk_theta[jump_idx] = jump_prop_theta
+                    mk_logpq[jump_idx] = jump_logpq + logdet_to_base
 
             prop_theta[mk_row_idx] = prop_mk_theta
             logpqratio[mk_row_idx] = mk_logpq

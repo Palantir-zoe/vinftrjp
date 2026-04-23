@@ -42,6 +42,19 @@ def parse_args():
         action="store_true",
         help="Use separate model-specific flows instead of the default conditional shared CTP flow.",
     )
+    parser.add_argument(
+        "--between-model-move",
+        type=str,
+        choices=["ctp", "latent", "semantic"],
+        default="ctp",
+        help="Dimension-changing move: conditional shared CTP, independent-flow latent append/drop, or semantic spacing split/merge.",
+    )
+    parser.add_argument(
+        "--split-beta",
+        type=float,
+        default=2.0,
+        help="Beta(a,a) auxiliary distribution parameter for semantic spacing split proportions.",
+    )
     return parser.parse_args()
 
 
@@ -82,6 +95,7 @@ def main():
     )
 
     problem = ChangePoint(k_max=args.k_max)
+    use_shared_flow = (args.between_model_move in {"ctp", "semantic"}) and not args.independent_flows
     model = ChangePointModelVINF(
         problem=problem,
         normalizing_flows=normalizing_flows,
@@ -89,7 +103,9 @@ def main():
         within_model_prob=args.within_model_prob,
         within_model_scale=args.within_model_scale,
         aux_scale=args.aux_scale,
-        use_conditional_shared_flow=not args.independent_flows,
+        use_conditional_shared_flow=use_shared_flow,
+        between_model_move=args.between_model_move,
+        split_beta=args.split_beta,
     )
 
     sampler = RJMCMC(model)
