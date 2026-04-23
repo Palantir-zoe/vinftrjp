@@ -45,15 +45,27 @@ def parse_args():
     parser.add_argument(
         "--between-model-move",
         type=str,
-        choices=["ctp", "latent", "semantic"],
+        choices=["ctp", "latent", "semantic", "semantic_learned"],
         default="ctp",
-        help="Dimension-changing move: conditional shared CTP, independent-flow latent append/drop, or semantic spacing split/merge.",
+        help="Dimension-changing move: conditional shared CTP, independent-flow latent append/drop, semantic split/merge, or semantic split/merge with learned rho proposal.",
     )
     parser.add_argument(
         "--split-beta",
         type=float,
         default=2.0,
         help="Beta(a,a) auxiliary distribution parameter for semantic spacing split proportions.",
+    )
+    parser.add_argument(
+        "--semantic-fit-samples",
+        type=int,
+        default=2048,
+        help="Number of flow samples used to fit the learned rho proposal in semantic_learned mode.",
+    )
+    parser.add_argument(
+        "--semantic-min-sigma",
+        type=float,
+        default=0.25,
+        help="Minimum standard deviation for the learned Gaussian proposal on logit(rho).",
     )
     return parser.parse_args()
 
@@ -95,7 +107,7 @@ def main():
     )
 
     problem = ChangePoint(k_max=args.k_max)
-    use_shared_flow = (args.between_model_move in {"ctp", "semantic"}) and not args.independent_flows
+    use_shared_flow = (args.between_model_move in {"ctp", "semantic", "semantic_learned"}) and not args.independent_flows
     model = ChangePointModelVINF(
         problem=problem,
         normalizing_flows=normalizing_flows,
@@ -106,6 +118,8 @@ def main():
         use_conditional_shared_flow=use_shared_flow,
         between_model_move=args.between_model_move,
         split_beta=args.split_beta,
+        semantic_fit_samples=args.semantic_fit_samples,
+        semantic_min_sigma=args.semantic_min_sigma,
     )
 
     sampler = RJMCMC(model)

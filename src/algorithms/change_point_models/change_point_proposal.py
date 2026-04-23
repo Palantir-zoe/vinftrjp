@@ -105,6 +105,8 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
         use_conditional_shared_flow=True,
         between_model_move="ctp",
         split_beta=2.0,
+        semantic_fit_samples=2048,
+        semantic_min_sigma=0.25,
         **kwargs,
     ):
         self.normalizing_flows = normalizing_flows
@@ -122,9 +124,11 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
         self.use_conditional_shared_flow = use_conditional_shared_flow
         self.between_model_move = between_model_move
         self.split_beta = float(split_beta)
-        if self.between_model_move not in {"ctp", "latent", "semantic"}:
+        self.semantic_fit_samples = int(semantic_fit_samples)
+        self.semantic_min_sigma = float(semantic_min_sigma)
+        if self.between_model_move not in {"ctp", "latent", "semantic", "semantic_learned"}:
             raise ValueError(
-                "between_model_move must be one of {'ctp', 'latent', 'semantic'}, "
+                "between_model_move must be one of {'ctp', 'latent', 'semantic', 'semantic_learned'}, "
                 f"got {self.between_model_move}"
             )
 
@@ -155,6 +159,8 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
             for mk in mklist:
                 self.mk_logZhat[mk] = -np.log(len(mklist))
                 self.flows[mk] = self.shared_flow
+            if self.between_model_move == "semantic_learned":
+                self._fit_semantic_rho_models()
             return
 
         for mk in mklist:
@@ -173,6 +179,9 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
                 self.normalizing_flows,
                 target=target,
             ).double()
+
+        if self.between_model_move == "semantic_learned":
+            self._fit_semantic_rho_models()
 
     def transformToBase(self, inputs, mk):
         if self.use_conditional_shared_flow:
@@ -366,6 +375,60 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
     def _merge_selection_log_prob(self, k, n):
         return np.full(n, -np.log(k), dtype=np.float64)
 
+    def _logit_np(self, p):
+        p = np.clip(np.asarray(p, dtype=np.float64), 1e-12, 1.0 - 1e-12)
+        return np.log(p) - np.log1p(-p)
+
+    def _sigmoid_np(self, x):
+        return 1.0 / (1.0 + np.exp(-x))
+
+    def _fit_semantic_rho_models(self):
+        self.semantic_rho_models = {}
+
+        for parent_k in range(self.problem.k_max):
+            child_mk = (parent_k + 1,)
+            child_theta = self.sample_model_parameters_from_flow(child_mk, self.semantic_fit_samples)
+            child_x = self.concatParameters(child_theta, child_mk)
+            child_weights = self._raw_to_weights(child_x)
+
+            for split_idx in range(parent_k + 1):
+                parent_weights = np.zeros((child_weights.shape[0], parent_k + 1), dtype=np.float64)
+                merged = child_weights[:, split_idx] + child_weights[:, split_idx + 1]
+                rho = child_weights[:, split_idx] / np.clip(merged, 1e-300, 1.0)
+                logit_rho = self._logit_np(rho)
+
+                parent_weights[:, :split_idx] = child_weights[:, :split_idx]
+                parent_weights[:, split_idx] = merged
+                parent_weights[:, split_idx + 1 :] = child_weights[:, split_idx + 2 :]
+
+                parent_x = self._weights_to_raw(parent_weights)
+                X = np.column_stack([np.ones(parent_x.shape[0], dtype=np.float64), parent_x])
+                ridge = 1e-6 * np.eye(X.shape[1], dtype=np.float64)
+                coef = np.linalg.solve(X.T @ X + ridge, X.T @ logit_rho)
+                resid = logit_rho - X @ coef
+                sigma = max(self.semantic_min_sigma, float(np.std(resid)))
+
+                self.semantic_rho_models[(parent_k, split_idx)] = {
+                    "coef": coef,
+                    "sigma": sigma,
+                }
+
+    def _semantic_learned_logit_params(self, parent_x, parent_k, split_idx):
+        model = getattr(self, "semantic_rho_models", {}).get((parent_k, split_idx))
+        if model is None:
+            sigma = max(self.semantic_min_sigma, 1.0)
+            return np.zeros(parent_x.shape[0], dtype=np.float64), np.full(parent_x.shape[0], sigma, dtype=np.float64)
+
+        X = np.column_stack([np.ones(parent_x.shape[0], dtype=np.float64), parent_x])
+        mu = X @ model["coef"]
+        sigma = np.full(parent_x.shape[0], model["sigma"], dtype=np.float64)
+        return mu, sigma
+
+    def _semantic_learned_logpdf(self, rho, parent_x, parent_k, split_idx):
+        mu, sigma = self._semantic_learned_logit_params(parent_x, parent_k, split_idx)
+        logit_rho = self._logit_np(rho)
+        return norm(mu, sigma).logpdf(logit_rho) - np.log(np.clip(rho * (1.0 - rho), 1e-300, 1.0))
+
     def _semantic_birth(self, block_theta, mk, new_mk):
         k = int(mk[0])
         n = block_theta.shape[0]
@@ -400,6 +463,55 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
         )
         log_forward_select = self._split_selection_log_prob(weights, split_idx)
         log_forward_aux = beta_distribution(self.split_beta, self.split_beta).logpdf(rho)
+        log_reverse_select = self._merge_selection_log_prob(int(new_mk[0]), n)
+        logpqratio = log_reverse_select - log_forward_select - log_forward_aux + log_jac
+        return prop_theta, logpqratio
+
+    def _semantic_birth_learned(self, block_theta, mk, new_mk):
+        k = int(mk[0])
+        n = block_theta.shape[0]
+        x = self.concatParameters(block_theta, mk)
+        weights = self._raw_to_weights(x)
+
+        split_idx = np.zeros(n, dtype=int)
+        for row in range(n):
+            split_idx[row] = np.random.choice(np.arange(k + 1), p=weights[row] / weights[row].sum())
+
+        rho = np.zeros(n, dtype=np.float64)
+        log_forward_aux = np.zeros(n, dtype=np.float64)
+        for j in range(k + 1):
+            idx = split_idx == j
+            if not idx.any():
+                continue
+            mu, sigma = self._semantic_learned_logit_params(x[idx], k, j)
+            logit_rho = mu + sigma * np.random.randn(idx.sum())
+            logit_rho = np.asarray(logit_rho, dtype=np.float64).reshape(idx.sum())
+            rho[idx] = self._sigmoid_np(logit_rho)
+            log_forward_aux[idx] = norm(mu, sigma).logpdf(logit_rho) - np.log(
+                np.clip(rho[idx] * (1.0 - rho[idx]), 1e-300, 1.0)
+            )
+        rho = np.clip(rho, 1e-12, 1.0 - 1e-12)
+
+        new_weights = np.zeros((n, k + 2), dtype=np.float64)
+        split_weight = weights[np.arange(n), split_idx]
+
+        for row in range(n):
+            j = int(split_idx[row])
+            new_weights[row, :j] = weights[row, :j]
+            new_weights[row, j] = rho[row] * weights[row, j]
+            new_weights[row, j + 1] = (1.0 - rho[row]) * weights[row, j]
+            new_weights[row, j + 2 :] = weights[row, j + 1 :]
+
+        new_x = self._weights_to_raw(new_weights)
+        prop_theta = self.setVariable(block_theta.copy(), self.indicator_name, np.full(n, int(new_mk[0])))
+        prop_theta = self.deconcatParameters(new_x, prop_theta, new_mk)
+
+        log_jac = (
+            np.log(np.clip(split_weight, 1e-300, 1.0))
+            + self._raw_to_weight_logdet(x)
+            - self._raw_to_weight_logdet(new_x)
+        )
+        log_forward_select = self._split_selection_log_prob(weights, split_idx)
         log_reverse_select = self._merge_selection_log_prob(int(new_mk[0]), n)
         logpqratio = log_reverse_select - log_forward_select - log_forward_aux + log_jac
         return prop_theta, logpqratio
@@ -439,6 +551,48 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
         logpqratio = log_reverse_select + log_reverse_aux - log_forward_select - log_birth_jac
         return prop_theta, logpqratio
 
+    def _semantic_death_learned(self, block_theta, mk, new_mk):
+        k = int(mk[0])
+        n = block_theta.shape[0]
+        x = self.concatParameters(block_theta, mk)
+        weights = self._raw_to_weights(x)
+
+        merge_idx = np.random.randint(k, size=n)
+        new_weights = np.zeros((n, k), dtype=np.float64)
+        merged_weight = np.zeros(n, dtype=np.float64)
+        rho = np.zeros(n, dtype=np.float64)
+
+        for row in range(n):
+            j = int(merge_idx[row])
+            merged_weight[row] = weights[row, j] + weights[row, j + 1]
+            rho[row] = weights[row, j] / merged_weight[row]
+            new_weights[row, :j] = weights[row, :j]
+            new_weights[row, j] = merged_weight[row]
+            new_weights[row, j + 1 :] = weights[row, j + 2 :]
+
+        rho = np.clip(rho, 1e-12, 1.0 - 1e-12)
+        new_x = self._weights_to_raw(new_weights)
+        prop_theta = self.setVariable(block_theta.copy(), self.indicator_name, np.full(n, int(new_mk[0])))
+        prop_theta = self.deconcatParameters(new_x, prop_theta, new_mk)
+
+        log_birth_jac = (
+            np.log(np.clip(merged_weight, 1e-300, 1.0))
+            + self._raw_to_weight_logdet(new_x)
+            - self._raw_to_weight_logdet(x)
+        )
+        log_forward_select = self._merge_selection_log_prob(k, n)
+        log_reverse_select = self._split_selection_log_prob(new_weights, merge_idx)
+
+        log_reverse_aux = np.zeros(n, dtype=np.float64)
+        for j in range(k):
+            idx = merge_idx == j
+            if not idx.any():
+                continue
+            log_reverse_aux[idx] = self._semantic_learned_logpdf(rho[idx], new_x[idx], k - 1, j)
+
+        logpqratio = log_reverse_select + log_reverse_aux - log_forward_select - log_birth_jac
+        return prop_theta, logpqratio
+
     def draw(self, theta, size=1):
         prop_theta = theta.copy()
         logpqratio = np.zeros(theta.shape[0])
@@ -464,7 +618,7 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
                 ) = self.within_model_proposal.draw(mk_theta[within_idx], within_idx.sum())
 
             if jump_idx.any():
-                if self.between_model_move == "semantic":
+                if self.between_model_move in {"semantic", "semantic_learned"}:
                     jump_distribution = self._jump_distribution(k)
                     choices = np.array(list(jump_distribution.keys()), dtype=int)
                     probs = np.array(list(jump_distribution.values()), dtype=float)
@@ -479,9 +633,15 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
                         block_theta = mk_theta[jump_idx][local_idx].copy()
 
                         if new_k == k + 1:
-                            prop_jump, local_logpq = self._semantic_birth(block_theta, mk, new_mk)
+                            if self.between_model_move == "semantic_learned":
+                                prop_jump, local_logpq = self._semantic_birth_learned(block_theta, mk, new_mk)
+                            else:
+                                prop_jump, local_logpq = self._semantic_birth(block_theta, mk, new_mk)
                         elif new_k == k - 1:
-                            prop_jump, local_logpq = self._semantic_death(block_theta, mk, new_mk)
+                            if self.between_model_move == "semantic_learned":
+                                prop_jump, local_logpq = self._semantic_death_learned(block_theta, mk, new_mk)
+                            else:
+                                prop_jump, local_logpq = self._semantic_death(block_theta, mk, new_mk)
                         else:
                             raise ValueError(f"Unsupported jump from {k} to {new_k}")
 

@@ -97,7 +97,9 @@ class RJMCMC:
             ) = self.single_mutation(theta[step - 1][np.newaxis, :], np.array([llh[step - 1]]), 1)
             if VERBOSITY_HIGH():
                 print(theta[step])
-            progress(step, M, status="Running RJMCMC")
+            progress(step + 1, M, status="Running RJMCMC")
+        if M > 0:
+            print()
         return theta, prop_theta, llh, log_prior, ar
 
     def single_mutation(self, theta, llh, N):
@@ -131,7 +133,6 @@ class RJMCMC:
         # accept/reject
         log_u = np.log(uniform.rvs(0, 1, size=N))
         reject_indices = log_acceptance_ratio < log_u
-        print(reject_indices)
         accepted_theta = prop_theta.copy()
         accepted_theta[reject_indices] = theta[reject_indices]
         prop_llh[reject_indices] = llh[reject_indices]
