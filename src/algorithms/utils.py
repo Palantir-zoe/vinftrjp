@@ -8,7 +8,8 @@ from src.vi_nflows import prepare_flow_for_inference
 def train_with_checkpoint(path_dir, folder, mk, func, *args, **kwargs):
     """Train normalizing flow with checkpointing functionality."""
     if len(path_dir) == 0:
-        return func(*args, **kwargs)
+        flow = func(*args, **kwargs)
+        return prepare_flow_for_inference(flow, device="cpu")
 
     _path_dir = os.path.join(path_dir, folder)
     name = f"flow_{mk}".replace(" ", "_")
