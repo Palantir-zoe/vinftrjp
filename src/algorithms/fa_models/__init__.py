@@ -6,6 +6,7 @@ __all__ = [
     "FactorAnalysisModelLW",
     "FactorAnalysisModelNF",
     "FactorAnalysisModelVINF",
+    "FactorAnalysisModelVINFIS",
     "FactorAnalysisModelVINFRF",
 ]
 
@@ -15,5 +16,6 @@ from .fa_models import (
     FactorAnalysisModelLW,
     FactorAnalysisModelNF,
     FactorAnalysisModelVINF,
+    FactorAnalysisModelVINFIS,
     FactorAnalysisModelVINFRF,
 )

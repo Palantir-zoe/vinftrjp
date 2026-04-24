@@ -1,5 +1,5 @@
 import torch
-from torch.distributions import HalfNormal, InverseGamma, MultivariateNormal, Normal
+from torch.distributions import HalfNormal, InverseGamma, Normal
 
 from src.algorithms.fa_models import FactorAnalysisModel
 from src.variables import ParametricModelSpace
@@ -237,11 +237,13 @@ class FactorAnalysisTarget(FactorAnalysisModel):
         betaii = theta[:, betaii_index]
         betaij = theta[:, betaij_index]
         lambdaii = theta[:, lambdaii_index]
+        concentration = torch.full((), 1.1, dtype=theta.dtype, device=theta.device)
+        rate = torch.full((), 0.05, dtype=theta.dtype, device=theta.device)
 
         # Compute log prior probabilities
         betaii_prior_log_prob = HalfNormal(scale=torch.ones_like(betaii)).log_prob(betaii)
         betaij_prior_log_prob = Normal(loc=torch.zeros_like(betaij), scale=torch.ones_like(betaij)).log_prob(betaij)
-        lambdaii_prior_log_prob = InverseGamma(concentration=1.1, rate=0.05).log_prob(lambdaii)
+        lambdaii_prior_log_prob = InverseGamma(concentration=concentration, rate=rate).log_prob(lambdaii)
 
         # Sum over parameter dimensions
         betaii_prior_log_prob = torch.sum(betaii_prior_log_prob, dim=1)
@@ -275,12 +277,12 @@ class FactorAnalysisTarget(FactorAnalysisModel):
 
         Numerical stability is ensured by adding small diagonal regularization.
         """
-        # Get parameter indices for all random variables
         cols = self.generateRVIndices()
+        y_data = self.y_data.to(device=theta.device, dtype=theta.dtype)
 
         n = theta.shape[0]  # Number of parameter samples
-        W = torch.zeros((n, self.obs_dim, self.k), device=theta.device)  # Factor loading matrix
-        L = torch.zeros((n, self.obs_dim, self.obs_dim), device=theta.device)  # Noise covariance matrix
+        W = torch.zeros((n, self.obs_dim, self.k), device=theta.device, dtype=theta.dtype)  # Factor loading matrix
+        L = torch.zeros((n, self.obs_dim, self.obs_dim), device=theta.device, dtype=theta.dtype)  # Noise covariance
 
         # Construct factor loading matrix W (lower triangular)
         # Diagonal elements (positive constrained)
@@ -307,11 +309,12 @@ class FactorAnalysisTarget(FactorAnalysisModel):
         # Compute covariance matrix: Σ = WWᵀ + L
         cov = torch.einsum("...ij,...jk->...ik", W, W.transpose(-1, -2)) + L
 
-        # Compute multivariate normal log-likelihood using torch.distributions
-        log_likelihood = torch.zeros(n, device=theta.device)
-
-        for i in range(cov.shape[0]):
-            mvn = MultivariateNormal(loc=torch.zeros(self.obs_dim, device=theta.device), covariance_matrix=cov[i])
-            log_likelihood[i] = mvn.log_prob(self.y_data).sum()
-
-        return log_likelihood
+        # Batched Gaussian log-likelihood for all parameter samples at once.
+        chol = torch.linalg.cholesky(cov)
+        logdets = 2.0 * torch.log(torch.diagonal(chol, dim1=-2, dim2=-1)).sum(dim=1)
+        y_t = y_data.transpose(0, 1).unsqueeze(0).expand(n, -1, -1)
+        solved = torch.cholesky_solve(y_t, chol)
+        quad_forms = torch.einsum("bdn,nd->b", solved, y_data)
+        log_2pi = torch.log(torch.tensor(2.0 * torch.pi, dtype=theta.dtype, device=theta.device))
+        normalizer = y_data.shape[0] * self.obs_dim * log_2pi
+        return -0.5 * (y_data.shape[0] * logdets + quad_forms + normalizer)

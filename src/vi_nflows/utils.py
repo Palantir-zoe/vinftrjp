@@ -1,3 +1,5 @@
+import os
+
 import torch
 
 
@@ -60,3 +62,65 @@ def move_to_device(obj, data_type=None, device=None):
 
     obj = obj.to(device=device)
     return obj
+
+
+def resolve_flow_training_device(device=None):
+    """Resolve the device used for flow training.
+
+    Precedence is:
+    1. Explicit ``device`` argument
+    2. ``FLOW_TRAIN_DEVICE`` environment variable
+    3. ``"cpu"``
+
+    The special value ``"auto"`` selects CUDA when available and otherwise CPU.
+    Any unavailable CUDA request falls back to CPU so training scripts remain usable
+    on machines without a GPU-enabled PyTorch build.
+    """
+
+    requested = device
+    if requested is None:
+        requested = os.environ.get("FLOW_TRAIN_DEVICE", "cpu")
+
+    requested = str(requested).strip().lower()
+    if requested == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        print("Requested CUDA flow training, but CUDA is unavailable; falling back to CPU.")
+        return "cpu"
+
+    return requested or "cpu"
+
+
+def resolve_flow_training_int(env_name, default, minimum=1):
+    """Resolve an integer flow-training setting from the environment."""
+
+    raw_value = os.environ.get(env_name)
+    if raw_value is None:
+        return default
+
+    try:
+        value = int(raw_value)
+    except ValueError:
+        print(f"Ignoring invalid integer value for {env_name}: {raw_value!r}. Using default {default}.")
+        return default
+
+    if value < minimum:
+        print(f"Ignoring {env_name}={value} because it is smaller than {minimum}. Using default {default}.")
+        return default
+
+    return value
+
+
+def prepare_flow_for_inference(flow, device="cpu"):
+    """Move a trained flow to an inference device before caching or reuse."""
+
+    if hasattr(flow, "to"):
+        flow = flow.to(device)
+    elif device == "cpu" and hasattr(flow, "cpu"):
+        flow = flow.cpu()
+
+    if hasattr(flow, "eval"):
+        flow.eval()
+
+    return flow

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.fa.fa_base import N_SAMPLES, NPARTICLES, get_train_theta_start_theta
+from scripts.fa.fa_base import N_SAMPLES, NPARTICLES, configure_flow_training, get_train_theta_start_theta
 from scripts.fa.fa_vinfs import get_normalizing_flows
 from src.main import Experiments
 
@@ -28,11 +28,30 @@ def parse_args():
         default="RF_",
         help="Suffix inserted into output filenames for this oracle rejection-free run.",
     )
+    parser.add_argument(
+        "--flow-device",
+        type=str,
+        default="cpu",
+        help="Device for flow training only, e.g. 'cpu', 'cuda', or 'auto'.",
+    )
+    parser.add_argument(
+        "--flow-num-samples",
+        type=int,
+        default=None,
+        help="Override the number of Monte Carlo samples per flow-training iteration.",
+    )
+    parser.add_argument(
+        "--flow-hidden-layer-size",
+        type=int,
+        default=None,
+        help="Override the hidden width used by FA flow training networks.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    configure_flow_training(args.flow_device, args.flow_num_samples, args.flow_hidden_layer_size)
     if args.start <= 0 or args.end < args.start:
         raise ValueError(f"Invalid run range: start={args.start}, end={args.end}")
 

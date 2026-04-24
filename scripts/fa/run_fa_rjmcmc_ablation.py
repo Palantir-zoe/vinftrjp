@@ -5,6 +5,7 @@ import numpy as np
 from scripts.fa.fa_base import (
     N_SAMPLES,
     NPARTICLES,
+    configure_flow_training,
     get_train_theta_start_theta,
     run_rjmcmc_algorithm_based_ablation,
     setup_argparse,
@@ -85,6 +86,7 @@ if __name__ == "__main__":
     ALGORITHMS = [f"FactorAnalysisModel{algo}" for algo in ["VINF"]]
 
     args = setup_argparse()
+    configure_flow_training(args.flow_device, args.flow_num_samples, args.flow_hidden_layer_size)
     for run_no in range(args.start, args.end + 1):
         for n_particles in NPARTICLES:
             for prob in PROBLEMS:

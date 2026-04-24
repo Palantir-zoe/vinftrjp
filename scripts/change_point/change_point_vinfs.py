@@ -1,8 +1,9 @@
-from src.vi_nflows import TrainConditionalNormalizingFlow, TrainNormalizingFlow
+from src.vi_nflows import TrainConditionalNormalizingFlow, TrainNormalizingFlow, resolve_flow_training_device
 
 
-def build_normalizing_flows(*, max_iter=20000, lr=5e-5, num_samples=2**8, device="cpu", verbose=True):
+def build_normalizing_flows(*, max_iter=20000, lr=5e-5, num_samples=2**8, device=None, verbose=True):
     def _train(q0=None, target=None):
+        train_device = resolve_flow_training_device(device)
         config = {
             "flow_type_1d": "Planar",
             "num_of_flows_1d": 16,
@@ -22,7 +23,7 @@ def build_normalizing_flows(*, max_iter=20000, lr=5e-5, num_samples=2**8, device
             max_iter=max_iter,
             lr=lr,
             num_samples=num_samples,
-            device=device,
+            device=train_device,
             verbose=verbose,
         )
         # Change-point targets can produce very sharp posterior geometry near

@@ -94,7 +94,7 @@ class TrainableLOFTLayer(Flow):
         """
         # $x = \text{sign}(z) \cdot (\log(\max(|z|-t,0)+1) + \min(|z|,t))$
         # log determinant: $\log|J| = -\sum \log(\max(|z|-t,0)+1)$
-        part1 = torch.max(torch.abs(z) - t, torch.tensor(0.0))
+        part1 = torch.clamp_min(torch.abs(z) - t, 0.0)
         part2 = torch.min(torch.abs(z), t)
 
         new_value = torch.sign(z) * (torch.log(part1 + 1) + part2)
@@ -122,7 +122,7 @@ class TrainableLOFTLayer(Flow):
 
         t = self.get_t()
 
-        part1 = torch.max(torch.abs(z) - t, torch.tensor(0.0))
+        part1 = torch.clamp_min(torch.abs(z) - t, 0.0)
         part2 = torch.min(torch.abs(z), t)
 
         new_value = torch.sign(z) * (torch.exp(part1) - 1.0 + part2)
@@ -155,8 +155,10 @@ class PositiveConstraintLayer(Flow):
         assert torch.is_tensor(pos_constraint_ids)
 
         self.total_dim = total_dim
-        self.pos_constraint_ids = pos_constraint_ids
-        self.no_constraint_ids = torch.tensor(np.delete(np.arange(total_dim), pos_constraint_ids))
+        pos_constraint_ids = pos_constraint_ids.to(dtype=torch.long)
+        no_constraint_ids = torch.tensor(np.delete(np.arange(total_dim), pos_constraint_ids.cpu().numpy()), dtype=torch.long)
+        self.register_buffer("pos_constraint_ids", pos_constraint_ids)
+        self.register_buffer("no_constraint_ids", no_constraint_ids)
 
     def forward(self, z):
         """

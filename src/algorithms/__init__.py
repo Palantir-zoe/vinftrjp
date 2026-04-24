@@ -4,6 +4,7 @@ __all__ = [
     "FactorAnalysisModelLW",
     "FactorAnalysisModelNF",
     "FactorAnalysisModelVINF",
+    "FactorAnalysisModelVINFIS",
     "FactorAnalysisModelVINFRF",
     "ToyModelAF",
     "ToyModelNF",
@@ -24,6 +25,7 @@ from .fa_models import (
     FactorAnalysisModelLW,
     FactorAnalysisModelNF,
     FactorAnalysisModelVINF,
+    FactorAnalysisModelVINFIS,
     FactorAnalysisModelVINFRF,
 )
 from .toy_models import ToyModelAF, ToyModelNF, ToyModelPerfect, ToyModelVINF
@@ -43,6 +45,7 @@ ALGORITHMS = {
     "FactorAnalysisModelLW": FactorAnalysisModelLW,
     "FactorAnalysisModelNF": FactorAnalysisModelNF,
     "FactorAnalysisModelVINF": FactorAnalysisModelVINF,
+    "FactorAnalysisModelVINFIS": FactorAnalysisModelVINFIS,
     "FactorAnalysisModelVINFRF": FactorAnalysisModelVINFRF,
     "ToyModelAF": ToyModelAF,
     "ToyModelNF": ToyModelNF,

@@ -17,6 +17,12 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=2222, help="Random seed.")
     parser.add_argument("--flow-iters", type=int, default=10000, help="Training iterations per model-specific flow.")
     parser.add_argument("--flow-samples", type=int, default=256, help="Monte Carlo samples per flow update.")
+    parser.add_argument(
+        "--flow-device",
+        type=str,
+        default="cpu",
+        help="Device for flow training only, e.g. 'cpu', 'cuda', or 'auto'. Sampling remains on CPU.",
+    )
     parser.add_argument("--save-flows-dir", type=str, default="data/flows/change_point", help="Flow checkpoint folder.")
     parser.add_argument("--output-dir", type=str, default="data/raw", help="Folder to save chain outputs.")
     parser.add_argument(
@@ -104,6 +110,7 @@ def main():
     normalizing_flows = build_normalizing_flows(
         max_iter=args.flow_iters,
         num_samples=args.flow_samples,
+        device=args.flow_device,
     )
 
     problem = ChangePoint(k_max=args.k_max)

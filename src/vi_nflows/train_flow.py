@@ -89,6 +89,7 @@ class TrainNormalizingFlowBase:
         save_path=None,
         verbose=True,
         use_loft=True,
+        hidden_layer_size=256,
         t=1,
         patience=None,
         improvement_threshold=None,
@@ -119,7 +120,7 @@ class TrainNormalizingFlowBase:
         self.use_loft = use_loft
 
         # Network architecture hyperparameters
-        self.hidden_layer_size = 256
+        self.hidden_layer_size = hidden_layer_size
         self.LOFT_THRESHOLD_VALUE = 100.0
         self.REAL_NVP_SCALING_FACTOR_BOUND_VALUE = 0.1
         self.REAL_NVP_SCALING_FACTOR_BOUND_TYPE = None

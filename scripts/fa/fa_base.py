@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import numpy as np
 import pymc as pm
@@ -28,7 +29,38 @@ def setup_argparse():
     parser = argparse.ArgumentParser(description="Process start and end parameters")
     parser.add_argument("--start", type=int, nargs="?", default=1, help="Start value (default: 1)")
     parser.add_argument("--end", type=int, nargs="?", default=3, help="End value (default: 3)")
+    parser.add_argument(
+        "--flow-device",
+        type=str,
+        default="cpu",
+        help="Device for flow training only, e.g. 'cpu', 'cuda', or 'auto'.",
+    )
+    parser.add_argument(
+        "--flow-num-samples",
+        type=int,
+        default=None,
+        help="Override the number of Monte Carlo samples per flow-training iteration.",
+    )
+    parser.add_argument(
+        "--flow-hidden-layer-size",
+        type=int,
+        default=None,
+        help="Override the hidden width used by FA flow training networks.",
+    )
     return parser.parse_args()
+
+
+def configure_flow_training(flow_device: str, flow_num_samples: int | None = None, flow_hidden_layer_size: int | None = None) -> None:
+    os.environ["FLOW_TRAIN_DEVICE"] = str(flow_device)
+    if flow_num_samples is None:
+        os.environ.pop("FLOW_TRAIN_NUM_SAMPLES", None)
+    else:
+        os.environ["FLOW_TRAIN_NUM_SAMPLES"] = str(flow_num_samples)
+
+    if flow_hidden_layer_size is None:
+        os.environ.pop("FLOW_HIDDEN_LAYER_SIZE", None)
+    else:
+        os.environ["FLOW_HIDDEN_LAYER_SIZE"] = str(flow_hidden_layer_size)
 
 
 def generate_train_theta_test_theta_k1(folder, run_no, n_particles, prob, y_data, SMC_SAMPLE_KWARGS):

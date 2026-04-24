@@ -184,6 +184,73 @@ class RJFlowGlobalFactorAnalysisProposalVINFRejectionFree(RJFlowGlobalFactorAnal
         return prop_theta, logpqratio, prop_ids
 
 
+class RJFlowGlobalFactorAnalysisProposalVINFImportanceSampling(RJFlowGlobalFactorAnalysisProposalVINFRejectionFree):
+    def __init__(
+        self,
+        normalizing_flows,
+        problem,
+        posterior_model_probabilities=None,
+        importance_num_samples=4000,
+        model_prior_probabilities=None,
+        **kwargs,
+    ):
+        self.importance_num_samples = int(importance_num_samples)
+        self.model_prior_probabilities = model_prior_probabilities
+        self.estimated_log_marginal_likelihoods = None
+        super().__init__(
+            normalizing_flows,
+            problem,
+            posterior_model_probabilities=posterior_model_probabilities,
+            **kwargs,
+        )
+
+    def calibratemmmpd(self, mmmpd, size, t):
+        RJFlowGlobalFactorAnalysisProposalVINF.calibratemmmpd(self, mmmpd, size, t)
+        self.posterior_model_probabilities = self._estimate_posterior_model_probabilities()
+
+        print("Estimated posterior model probabilities from flow importance sampling:")
+        for mk, prob in self.posterior_model_probabilities.items():
+            print(f"  {mk}: {prob:.6f}")
+
+    def _get_model_prior_probabilities(self, mklist):
+        if self.model_prior_probabilities is not None:
+            probs = {mk: float(self.model_prior_probabilities.get(mk, 0.0)) for mk in mklist}
+        else:
+            uniform_prob = 1.0 / len(mklist)
+            probs = {mk: uniform_prob for mk in mklist}
+
+        total = sum(probs.values())
+        if total <= 0:
+            raise ValueError(f"Model prior probabilities must sum to a positive value, got {probs}")
+
+        return {mk: prob / total for mk, prob in probs.items()}
+
+    def _estimate_log_marginal_likelihood(self, mk):
+        n = self.importance_num_samples
+        theta, log_q = self._sample_model_conditional(mk, n)
+        target = self.problem.target(self.pmodel.y_data, k=mk[0])
+
+        log_target = target.log_prob(torch.tensor(self.concatParameters(theta, mk), dtype=torch.float32))
+        log_target = np.asarray(log_target.detach().cpu().tolist(), dtype=np.float64)
+
+        return logsumexp(log_target - log_q) - np.log(n)
+
+    def _estimate_posterior_model_probabilities(self):
+        mklist = self.pmodel.getModelKeys()
+        model_prior_probabilities = self._get_model_prior_probabilities(mklist)
+
+        log_scores = np.zeros(len(mklist), dtype=np.float64)
+        self.estimated_log_marginal_likelihoods = {}
+
+        for i, mk in enumerate(mklist):
+            log_marginal = self._estimate_log_marginal_likelihood(mk)
+            self.estimated_log_marginal_likelihoods[mk] = float(log_marginal)
+            log_scores[i] = np.log(model_prior_probabilities[mk]) + log_marginal
+
+        log_norm = logsumexp(log_scores)
+        return {mk: float(np.exp(log_scores[i] - log_norm)) for i, mk in enumerate(mklist)}
+
+
 class FARWProposal(Proposal):
     def __init__(self, problem, *, betaii_names, betaij_names, lambda_names, **kwargs):
         self.problem = problem

@@ -2,6 +2,8 @@ import os
 
 import dill as pickle
 
+from src.vi_nflows import prepare_flow_for_inference
+
 
 def train_with_checkpoint(path_dir, folder, mk, func, *args, **kwargs):
     """Train normalizing flow with checkpointing functionality."""
@@ -18,6 +20,7 @@ def train_with_checkpoint(path_dir, folder, mk, func, *args, **kwargs):
             # Load pre-trained model from disk
             with open(file, "rb") as f:
                 flow = pickle.load(f)
+            flow = prepare_flow_for_inference(flow, device="cpu")
             print(f"\nLoaded pre-trained model: {file}")
             return flow
 
@@ -27,6 +30,7 @@ def train_with_checkpoint(path_dir, folder, mk, func, *args, **kwargs):
     # Train new model if no pre-trained model exists
     print("\nInitializing training...")
     flow = func(*args, **kwargs)
+    flow = prepare_flow_for_inference(flow, device="cpu")
 
     # Save trained model to disk
     try:
