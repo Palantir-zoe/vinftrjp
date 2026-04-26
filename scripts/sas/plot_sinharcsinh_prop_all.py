@@ -4,7 +4,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
-from scripts.sas.sas_base import DEFAULT_DATA_DICT, setup_argparse
+from scripts.sas.sas_base import DEFAULT_DATA_DICT, configure_flow_training, setup_argparse
 from scripts.sas.sas_vinfs import get_normalizing_flows
 from src.tools import PlotSinharcsinhPropAll
 from src.utils.tools import kde_1D, kde_joint
@@ -71,6 +71,12 @@ def plot_proposal(prob, prob_dict, exp, n_samples, figsize=(6, 6)):
 
 if __name__ == "__main__":
     args = setup_argparse()
+    configure_flow_training(
+        args.flow_device,
+        flow_num_samples=args.flow_num_samples,
+        flow_hidden_layer_size=args.flow_hidden_layer_size,
+        flow_annealing=args.flow_annealing,
+    )
     for prob, prob_dict in DEFAULT_DATA_DICT.items():
         for exp in range(args.start, args.end + 1):
             plot_proposal(prob, prob_dict, exp, N_SAMPLES, figsize=(6, 6))

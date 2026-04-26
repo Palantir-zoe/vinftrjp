@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 from nflows.distributions.normal import StandardNormal
@@ -74,7 +76,11 @@ class RJFlowGlobalFactorAnalysisProposalVINF(RJFlowGlobalFactorAnalysisProposal)
         super().__init__(problem, **kwargs)
 
     def calibratemmmpd(self, mmmpd, size, t):
+        within_start = time.perf_counter()
         self.within_model_proposal.calibratemmmpd(mmmpd, size, t)
+        self.within_model_calibration_seconds = time.perf_counter() - within_start
+
+        td_start = time.perf_counter()
 
         mklist = self.pmodel.getModelKeys()  # get all keys
 
@@ -91,6 +97,8 @@ class RJFlowGlobalFactorAnalysisProposalVINF(RJFlowGlobalFactorAnalysisProposal)
             self.flows[mk] = train_with_checkpoint(
                 self.save_flows_dir, folder, mk, self.normalizing_flows, q0=q0, target=p
             )
+
+        self.td_calibration_seconds = time.perf_counter() - td_start
 
     def transformToBase(self, inputs, mk):
         if self.getModelDim(mk) == 0:
@@ -205,8 +213,10 @@ class RJFlowGlobalFactorAnalysisProposalVINFImportanceSampling(RJFlowGlobalFacto
         )
 
     def calibratemmmpd(self, mmmpd, size, t):
+        td_start = time.perf_counter()
         RJFlowGlobalFactorAnalysisProposalVINF.calibratemmmpd(self, mmmpd, size, t)
         self.posterior_model_probabilities = self._estimate_posterior_model_probabilities()
+        self.td_calibration_seconds = time.perf_counter() - td_start
 
         print("Estimated posterior model probabilities from flow importance sampling:")
         for mk, prob in self.posterior_model_probabilities.items():

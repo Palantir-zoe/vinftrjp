@@ -290,17 +290,21 @@ class LTransform(Transform):
         super().__init__()
         if M is None:
             assert dim is not None
-            self.L = torch.eye(dim)
+            M = torch.eye(dim)
         else:
-            self.L = M
-            self.Linv = torch.linalg.inv(M)
-            self.ld = torch.logdet(M)
+            M = torch.as_tensor(M)
+
+        self.register_buffer("L", M)
+        self.register_buffer("Linv", torch.linalg.inv(M))
+        self.register_buffer("ld", torch.logdet(M))
 
     def forward(self, X, context=None):
-        return torch.matmul(X, self.L.T), torch.full([X.shape[0]], self.ld)
+        logdet = torch.ones(X.shape[0], device=X.device, dtype=X.dtype) * self.ld.to(device=X.device, dtype=X.dtype)
+        return torch.matmul(X, self.L.T), logdet
 
     def inverse(self, X, context=None):
-        return torch.matmul(X, self.Linv.T), torch.full([X.shape[0]], -self.ld)
+        logdet = -torch.ones(X.shape[0], device=X.device, dtype=X.dtype) * self.ld.to(device=X.device, dtype=X.dtype)
+        return torch.matmul(X, self.Linv.T), logdet
 
 
 class L1DTransform(Transform):

@@ -1,4 +1,5 @@
 import argparse
+import csv
 from pathlib import Path
 
 import matplotlib
@@ -35,6 +36,12 @@ def parse_args():
         type=str,
         default="docs/figures/nightly_fa_vinf_vs_vinfis_n8000",
         help="Directory where the generated figures will be written.",
+    )
+    parser.add_argument(
+        "--runtime-summary-csv",
+        type=str,
+        default="",
+        help="Optional path to the runtime summary CSV. Defaults to <nightly-output-dir>/overnight_summary.csv.",
     )
     parser.add_argument("--run-start", type=int, default=1, help="First nightly run index to include in the chain plot.")
     parser.add_argument("--run-end", type=int, default=10, help="Last nightly run index to include in the chain plot.")
@@ -185,6 +192,85 @@ def load_acceptance_and_ess(output_dir: Path, algorithm: str, run_start: int, ru
             }
         )
     return rows
+
+
+def load_runtime_rows(summary_csv: Path, run_start: int, run_end: int):
+    if not summary_csv.exists():
+        return []
+
+    rows = []
+    with summary_csv.open("r", newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            run_no = int(row["run_no"])
+            if not (run_start <= run_no <= run_end):
+                continue
+            if row.get("status") not in {"completed", "skipped_existing"}:
+                continue
+            rows.append(row)
+    return rows
+
+
+def plot_runtime_comparison(summary_csv: Path, figures_dir: Path, args):
+    setup_matplotlib()
+    rows = load_runtime_rows(summary_csv, args.run_start, args.run_end)
+    if not rows:
+        return None, None, {}
+
+    metrics = {}
+    for algorithm, _, label in ALGORITHM_SPECS:
+        algorithm_rows = [row for row in rows if row["algorithm"] == algorithm]
+        metrics[label] = {
+            "td_proposal_fit_or_train_seconds": [
+                float(row["td_proposal_fit_or_train_seconds"])
+                for row in algorithm_rows
+                if row.get("td_proposal_fit_or_train_seconds", "") not in {"", None}
+            ],
+            "rjmcmc_sampling_seconds": [
+                float(row["rjmcmc_sampling_seconds"])
+                for row in algorithm_rows
+                if row.get("rjmcmc_sampling_seconds", "") not in {"", None}
+            ],
+            "runtime_seconds": [
+                float(row["runtime_seconds"]) for row in algorithm_rows if row.get("runtime_seconds", "") not in {"", None}
+            ],
+        }
+
+    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(11, 3.8))
+    x_positions = np.arange(len(ALGORITHM_SPECS))
+    plot_specs = [
+        ("td_proposal_fit_or_train_seconds", "TD Proposal Time (s)", "TD Proposal Fit/Train"),
+        ("rjmcmc_sampling_seconds", "Sampling Time (s)", "RJMCMC Sampling"),
+        ("runtime_seconds", "Method Runtime (s)", "Method Runtime"),
+    ]
+
+    for ax, (field_name, ylabel, title) in zip(axes, plot_specs, strict=True):
+        values = [metrics[label][field_name] for _, _, label in ALGORITHM_SPECS]
+        bp = ax.boxplot(values, positions=x_positions, widths=0.55, patch_artist=True, showfliers=False)
+        for patch, (_, color, _) in zip(bp["boxes"], ALGORITHM_SPECS, strict=True):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.18)
+            patch.set_edgecolor(color)
+        for median, (_, color, _) in zip(bp["medians"], ALGORITHM_SPECS, strict=True):
+            median.set_color(color)
+            median.set_linewidth(1.6)
+
+        for xpos, run_values, (_, color, _) in zip(x_positions, values, ALGORITHM_SPECS, strict=True):
+            jitter = np.linspace(-0.08, 0.08, len(run_values)) if run_values else np.array([])
+            ax.scatter(np.full(len(run_values), xpos) + jitter, run_values, color=color, s=24, alpha=0.8)
+
+        ax.set_xticks(x_positions, [label for _, _, label in ALGORITHM_SPECS])
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+
+    plt.tight_layout()
+    suffix = f"runs{args.run_start}-{args.run_end}_{args.tag}"
+    pdf_path = figures_dir / f"FA_runtime_VINF_vs_VINFIS_N{args.n_particles}_{suffix}.pdf"
+    png_path = figures_dir / f"FA_runtime_VINF_vs_VINFIS_N{args.n_particles}_{suffix}.png"
+    fig.savefig(str(pdf_path))
+    fig.savefig(str(png_path), dpi=200)
+    plt.close(fig)
+    return pdf_path, png_path, metrics
 
 
 def plot_acceptance_and_ess(output_dir: Path, figures_dir: Path, args):
@@ -406,10 +492,12 @@ def main():
     args = parse_args()
     output_dir = Path(args.nightly_output_dir)
     figures_dir = Path(args.figures_dir)
+    runtime_summary_csv = Path(args.runtime_summary_csv) if args.runtime_summary_csv else output_dir / "overnight_summary.csv"
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     rjmcmc_pdf, rjmcmc_png, available = plot_rjmcmc(output_dir, figures_dir, args)
     acceptance_pdf, acceptance_png, metrics = plot_acceptance_and_ess(output_dir, figures_dir, args)
+    runtime_pdf, runtime_png, runtime_metrics = plot_runtime_comparison(runtime_summary_csv, figures_dir, args)
     proposal_pdf, proposal_png, estimated_probs = plot_proposals(figures_dir, args)
 
     print("Generated FA nightly comparison figures:")
@@ -417,6 +505,9 @@ def main():
     print(f"  RJMCMC png: {rjmcmc_png}")
     print(f"  Acceptance/ESS pdf: {acceptance_pdf}")
     print(f"  Acceptance/ESS png: {acceptance_png}")
+    if runtime_pdf is not None and runtime_png is not None:
+        print(f"  Runtime pdf: {runtime_pdf}")
+        print(f"  Runtime png: {runtime_png}")
     print(f"  Proposal pdf: {proposal_pdf}")
     print(f"  Proposal png: {proposal_png}")
     if available:
@@ -429,6 +520,17 @@ def main():
                 mean_ess = np.mean([row["ess_indicator_k1"] for row in rows])
                 print(f"  {label} mean accepted-move rate: {mean_acceptance:.4f}")
                 print(f"  {label} mean ESS(1{{k=1}}): {mean_ess:.1f}")
+    if runtime_metrics:
+        for label, metric_dict in runtime_metrics.items():
+            td_values = metric_dict["td_proposal_fit_or_train_seconds"]
+            sampling_values = metric_dict["rjmcmc_sampling_seconds"]
+            runtime_values = metric_dict["runtime_seconds"]
+            if td_values:
+                print(f"  {label} mean TD proposal fit/train time: {np.mean(td_values):.2f}s")
+            if sampling_values:
+                print(f"  {label} mean RJMCMC sampling time: {np.mean(sampling_values):.2f}s")
+            if runtime_values:
+                print(f"  {label} mean method runtime: {np.mean(runtime_values):.2f}s")
     if estimated_probs:
         print(f"  VINFIS estimated model probabilities during proposal calibration: {estimated_probs}")
 

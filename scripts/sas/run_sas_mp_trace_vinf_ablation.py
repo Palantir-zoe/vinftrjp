@@ -1,4 +1,4 @@
-from scripts.sas.sas_base import N_SAMPLES, run_rjmcmc_algorithm_based_ablation, setup_argparse
+from scripts.sas.sas_base import N_SAMPLES, configure_flow_training, run_rjmcmc_algorithm_based_ablation, setup_argparse
 from scripts.sas.sas_vinfs import (
     get_normalizing_flows_6_5,
     get_normalizing_flows_6_8,
@@ -11,6 +11,7 @@ from scripts.sas.sas_vinfs import (
     get_normalizing_flows_12_11,
 )
 from src.utils.parallel import algorithm_based_run_with_fixed_resources
+from src.vi_nflows import resolve_flow_training_device
 
 ablations = [
     {"algorithm_suffix": "6and5_", "normalizing_flows": get_normalizing_flows_6_5},
@@ -30,6 +31,13 @@ ALGORITHMS = ["ToyModelVINF"]
 
 if __name__ == "__main__":
     args = setup_argparse()
+    configure_flow_training(
+        args.flow_device,
+        flow_num_samples=args.flow_num_samples,
+        flow_hidden_layer_size=args.flow_hidden_layer_size,
+        flow_annealing=args.flow_annealing,
+    )
+    run_device = "cuda" if resolve_flow_training_device(args.flow_device).startswith("cuda") else "cpu"
 
     algorithm_based_run_with_fixed_resources(
         run_rjmcmc_algorithm_based_ablation,
@@ -44,4 +52,6 @@ if __name__ == "__main__":
         ablations=ablations,
         # rjmcmc
         n_samples=N_SAMPLES,
+        device=run_device,
+        save_flows_dir=args.save_flows_dir,
     )

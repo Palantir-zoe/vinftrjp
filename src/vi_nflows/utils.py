@@ -112,6 +112,23 @@ def resolve_flow_training_int(env_name, default, minimum=1):
     return value
 
 
+def resolve_flow_training_bool(env_name, default):
+    """Resolve a boolean flow-training setting from the environment."""
+
+    raw_value = os.environ.get(env_name)
+    if raw_value is None:
+        return default
+
+    value = str(raw_value).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+
+    print(f"Ignoring invalid boolean value for {env_name}: {raw_value!r}. Using default {default}.")
+    return default
+
+
 def prepare_flow_for_inference(flow, device="cpu"):
     """Move a trained flow to an inference device before caching or reuse."""
 

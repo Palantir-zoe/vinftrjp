@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 from scipy.special import logsumexp
@@ -35,7 +37,11 @@ class RJFlowGlobalFactorAnalysisProposal(Proposal):
         self.exclude_concat = [indicator_name]
 
     def calibratemmmpd(self, mmmpd, size, t):
+        within_start = time.perf_counter()
         self.within_model_proposal.calibratemmmpd(mmmpd, size, t)
+        self.within_model_calibration_seconds = time.perf_counter() - within_start
+
+        td_start = time.perf_counter()
 
         mklist = self.pmodel.getModelKeys()  # get all keys
 
@@ -87,6 +93,8 @@ class RJFlowGlobalFactorAnalysisProposal(Proposal):
                 raise ValueError("X is singular", X)
 
             self._calibratemmmpd(mk, mk_theta_w, spec, dim, X)
+
+        self.td_calibration_seconds = time.perf_counter() - td_start
 
     def _calibratemmmpd(self, mk, mk_theta_w, spec, dim, X):
         raise NotImplementedError

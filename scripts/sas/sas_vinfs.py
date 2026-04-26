@@ -1,13 +1,35 @@
-from src.vi_nflows import TrainNormalizingFlow, resolve_flow_training_device
+from src.vi_nflows import (
+    TrainNormalizingFlow,
+    resolve_flow_training_bool,
+    resolve_flow_training_device,
+    resolve_flow_training_int,
+)
+
+
+def _resolve_sas_flow_training_kwargs(device=None):
+    resolved_device = resolve_flow_training_device(device)
+    if resolved_device.startswith("cuda"):
+        default_num_samples = 2**9
+        default_hidden_layer_size = 256
+    else:
+        default_num_samples = 2**8
+        default_hidden_layer_size = 256
+
+    return {
+        "device": resolved_device,
+        "num_samples": resolve_flow_training_int("FLOW_TRAIN_NUM_SAMPLES", default_num_samples),
+        "hidden_layer_size": resolve_flow_training_int("FLOW_HIDDEN_LAYER_SIZE", default_hidden_layer_size),
+        "annealing": resolve_flow_training_bool("FLOW_TRAIN_ANNEALING", True),
+    }
 
 
 def _run_flow(q0, target, *, num_flows_1d, num_flows_2d, device=None):
+    training_kwargs = _resolve_sas_flow_training_kwargs(device)
     kwargs = {
         "max_iter": 10000,
         "lr": 1e-4,
-        "num_samples": 2**8,
-        "device": resolve_flow_training_device(device),
         "verbose": True,
+        **training_kwargs,
     }
     config = {
         "flow_type_1d": "Planar",

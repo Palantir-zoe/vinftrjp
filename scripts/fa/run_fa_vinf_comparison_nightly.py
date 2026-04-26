@@ -93,6 +93,12 @@ def parse_args():
         help="Directory used to save overnight chain outputs and summaries.",
     )
     parser.add_argument(
+        "--runtime-summary-csv",
+        type=str,
+        default="",
+        help="Optional path for the per-algorithm runtime summary CSV. Defaults to <output-dir>/overnight_runtime_summary.csv.",
+    )
+    parser.add_argument(
         "--tag",
         type=str,
         default="nightly",
@@ -149,6 +155,17 @@ def get_vinfis_proposal(proposal):
     return proposal
 
 
+def extract_td_proposal(proposal):
+    if hasattr(proposal, "td_calibration_seconds"):
+        return proposal
+
+    for subproposal in getattr(proposal, "ps", []):
+        if hasattr(subproposal, "td_calibration_seconds"):
+            return subproposal
+
+    return None
+
+
 def build_jobs(run_start: int, run_end: int):
     jobs = []
     for run_no in range(run_start, run_end + 1):
@@ -187,6 +204,9 @@ def save_summary_csv(summary_path: Path, rows):
         "status",
         "seed",
         "runtime_seconds",
+        "posterior_sample_generation_seconds",
+        "td_proposal_fit_or_train_seconds",
+        "rjmcmc_sampling_seconds",
         "acceptance_rate",
         "chain_prob_k1",
         "chain_prob_k2",
@@ -201,6 +221,82 @@ def save_summary_csv(summary_path: Path, rows):
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def load_existing_summary(summary_path: Path):
+    if not summary_path.exists():
+        return {}
+
+    with summary_path.open("r", newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        return {(row["algorithm"], int(row["run_no"])): row for row in reader}
+
+
+def _mean_float_field(rows, field_name):
+    values = []
+    for row in rows:
+        value = row.get(field_name, "")
+        if value not in {"", None}:
+            values.append(float(value))
+    return float(np.mean(values)) if values else ""
+
+
+def write_runtime_summary(runtime_summary_path: Path, rows):
+    runtime_summary_path.parent.mkdir(parents=True, exist_ok=True)
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(row["algorithm"], []).append(row)
+
+    fieldnames = [
+        "algorithm",
+        "n_runs",
+        "n_completed_runs",
+        "mean_runtime_seconds",
+        "median_runtime_seconds",
+        "max_runtime_seconds",
+        "mean_posterior_sample_generation_seconds",
+        "mean_td_proposal_fit_or_train_seconds",
+        "mean_rjmcmc_sampling_seconds",
+        "mean_acceptance_rate",
+        "mean_chain_prob_k1",
+        "mean_chain_prob_k2",
+        "mean_estimated_prob_k1",
+        "mean_estimated_prob_k2",
+    ]
+
+    with runtime_summary_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for algorithm, algo_rows in grouped.items():
+            completed_rows = [row for row in algo_rows if row.get("status") in {"completed", "skipped_existing"}]
+            runtime_values = [
+                float(row["runtime_seconds"])
+                for row in completed_rows
+                if row.get("runtime_seconds", "") not in {"", None}
+            ]
+
+            writer.writerow(
+                {
+                    "algorithm": algorithm,
+                    "n_runs": len(algo_rows),
+                    "n_completed_runs": len(completed_rows),
+                    "mean_runtime_seconds": float(np.mean(runtime_values)) if runtime_values else "",
+                    "median_runtime_seconds": float(np.median(runtime_values)) if runtime_values else "",
+                    "max_runtime_seconds": float(np.max(runtime_values)) if runtime_values else "",
+                    "mean_posterior_sample_generation_seconds": _mean_float_field(
+                        completed_rows, "posterior_sample_generation_seconds"
+                    ),
+                    "mean_td_proposal_fit_or_train_seconds": _mean_float_field(
+                        completed_rows, "td_proposal_fit_or_train_seconds"
+                    ),
+                    "mean_rjmcmc_sampling_seconds": _mean_float_field(completed_rows, "rjmcmc_sampling_seconds"),
+                    "mean_acceptance_rate": _mean_float_field(completed_rows, "acceptance_rate"),
+                    "mean_chain_prob_k1": _mean_float_field(completed_rows, "chain_prob_k1"),
+                    "mean_chain_prob_k2": _mean_float_field(completed_rows, "chain_prob_k2"),
+                    "mean_estimated_prob_k1": _mean_float_field(completed_rows, "estimated_prob_k1"),
+                    "mean_estimated_prob_k2": _mean_float_field(completed_rows, "estimated_prob_k2"),
+                }
+            )
 
 
 def run_job(job: Job, args, y_data, output_dir: Path):
@@ -226,10 +322,16 @@ def run_job(job: Job, args, y_data, output_dir: Path):
     else:
         raise ValueError(f"Unsupported algorithm: {job.algorithm}")
 
+    fit_started = time.perf_counter()
     sampler = RJMCMC(model, calibrate_draws=train_theta)
-    started = time.time()
+    fit_elapsed = time.perf_counter() - fit_started
+    td_proposal = extract_td_proposal(model.proposal)
+    td_fit_or_train_seconds = getattr(td_proposal, "td_calibration_seconds", fit_elapsed)
+
+    started = time.perf_counter()
     theta, prop_theta, llh, log_prior, ar = sampler.run(args.n_samples, start_theta=start_theta)
-    runtime_seconds = time.time() - started
+    sampling_seconds = time.perf_counter() - started
+    runtime_seconds = (td_fit_or_train_seconds or 0.0) + sampling_seconds
 
     stem = make_output_stem(job, args)
     np.save(output_dir / f"{stem}_theta.npy", theta)
@@ -251,6 +353,9 @@ def run_job(job: Job, args, y_data, output_dir: Path):
         "n_particles": args.n_particles,
         "n_samples": args.n_samples,
         "runtime_seconds": runtime_seconds,
+        "posterior_sample_generation_seconds": None,
+        "td_proposal_fit_or_train_seconds": td_fit_or_train_seconds,
+        "rjmcmc_sampling_seconds": sampling_seconds,
         "acceptance_rate": acceptance_rate,
         "chain_prob_k1": chain_prob_k1,
         "chain_prob_k2": chain_prob_k2,
@@ -282,17 +387,20 @@ def run_job(job: Job, args, y_data, output_dir: Path):
         "run_no": job.run_no,
         "status": "completed",
         "seed": seed,
-        "runtime_seconds": f"{runtime_seconds:.2f}",
-        "acceptance_rate": f"{acceptance_rate:.6f}",
-        "chain_prob_k1": f"{chain_prob_k1:.6f}",
-        "chain_prob_k2": f"{chain_prob_k2:.6f}",
+        "runtime_seconds": runtime_seconds,
+        "posterior_sample_generation_seconds": "",
+        "td_proposal_fit_or_train_seconds": td_fit_or_train_seconds,
+        "rjmcmc_sampling_seconds": sampling_seconds,
+        "acceptance_rate": acceptance_rate,
+        "chain_prob_k1": chain_prob_k1,
+        "chain_prob_k2": chain_prob_k2,
         "estimated_prob_k1": (
-            f"{summary.get('estimated_probabilities', {}).get('(1,)', float('nan')):.6f}"
+            summary.get("estimated_probabilities", {}).get("(1,)", "")
             if job.algorithm == "FactorAnalysisModelVINFIS"
             else ""
         ),
         "estimated_prob_k2": (
-            f"{summary.get('estimated_probabilities', {}).get('(2,)', float('nan')):.6f}"
+            summary.get("estimated_probabilities", {}).get("(2,)", "")
             if job.algorithm == "FactorAnalysisModelVINFIS"
             else ""
         ),
@@ -312,6 +420,7 @@ def main():
 
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
+    runtime_summary_path = Path(args.runtime_summary_csv) if args.runtime_summary_csv else output_dir / "overnight_runtime_summary.csv"
     logs_dir = output_dir / "logs"
     output_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -328,6 +437,7 @@ def main():
     jobs = build_jobs(args.run_start, args.run_end)
     summary_rows = []
     summary_csv_path = output_dir / "overnight_summary.csv"
+    existing_rows = load_existing_summary(summary_csv_path)
 
     print(f"Prepared {len(jobs)} jobs.")
     print(f"Input dir: {input_dir}")
@@ -347,24 +457,31 @@ def main():
         log_path = logs_dir / f"{stem}.log"
 
         if args.resume and all(path.exists() for path in outputs):
+            existing_row = existing_rows.get((job.algorithm, job.run_no), {})
             row = {
                 "algorithm": job.algorithm,
                 "run_no": job.run_no,
                 "status": "skipped_existing",
-                "seed": get_seed_for_run(job.run_no),
-                "runtime_seconds": "",
-                "acceptance_rate": "",
-                "chain_prob_k1": "",
-                "chain_prob_k2": "",
-                "estimated_prob_k1": "",
-                "estimated_prob_k2": "",
-                "importance_samples": args.importance_samples if job.algorithm == "FactorAnalysisModelVINFIS" else "",
-                "output_stem": stem,
+                "seed": existing_row.get("seed", get_seed_for_run(job.run_no)),
+                "runtime_seconds": existing_row.get("runtime_seconds", ""),
+                "posterior_sample_generation_seconds": existing_row.get("posterior_sample_generation_seconds", ""),
+                "td_proposal_fit_or_train_seconds": existing_row.get("td_proposal_fit_or_train_seconds", ""),
+                "rjmcmc_sampling_seconds": existing_row.get("rjmcmc_sampling_seconds", ""),
+                "acceptance_rate": existing_row.get("acceptance_rate", ""),
+                "chain_prob_k1": existing_row.get("chain_prob_k1", ""),
+                "chain_prob_k2": existing_row.get("chain_prob_k2", ""),
+                "estimated_prob_k1": existing_row.get("estimated_prob_k1", ""),
+                "estimated_prob_k2": existing_row.get("estimated_prob_k2", ""),
+                "importance_samples": existing_row.get(
+                    "importance_samples", args.importance_samples if job.algorithm == "FactorAnalysisModelVINFIS" else ""
+                ),
+                "output_stem": existing_row.get("output_stem", stem),
                 "log_path": str(log_path),
-                "error": "",
+                "error": existing_row.get("error", ""),
             }
             summary_rows.append(row)
             save_summary_csv(summary_csv_path, summary_rows)
+            write_runtime_summary(runtime_summary_path, summary_rows)
             print(f"Skipping completed job: run {job.run_no:02d} {job.algorithm}")
             continue
 
@@ -388,6 +505,9 @@ def main():
                     "status": "failed",
                     "seed": get_seed_for_run(job.run_no),
                     "runtime_seconds": "",
+                    "posterior_sample_generation_seconds": "",
+                    "td_proposal_fit_or_train_seconds": "",
+                    "rjmcmc_sampling_seconds": "",
                     "acceptance_rate": "",
                     "chain_prob_k1": "",
                     "chain_prob_k2": "",
@@ -404,6 +524,10 @@ def main():
             row["log_path"] = str(log_path)
             summary_rows.append(row)
             save_summary_csv(summary_csv_path, summary_rows)
+            write_runtime_summary(runtime_summary_path, summary_rows)
+
+    print(f"Wrote summary CSV to {summary_csv_path}")
+    print(f"Wrote runtime summary CSV to {runtime_summary_path}")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 from scipy.special import logsumexp
@@ -23,6 +25,7 @@ class RJToyModelProposal(Proposal):
 
         self.verbose = kwargs.get("verbose", False)
         self.run_index = kwargs.get("run_index", None)
+        self.save_flows_dir = kwargs.get("save_flows_dir", "")
 
         assert isinstance(within_model_proposal, Proposal)
         self.within_model_proposal = within_model_proposal
@@ -45,7 +48,11 @@ class RJToyModelProposal(Proposal):
         """
         This version computes the exact model probabilities for the 1D or 2D gaussian mixture example.
         """
+        within_start = time.perf_counter()
         self.within_model_proposal.calibratemmmpd(mmmpd, size, t)
+        self.within_model_calibration_seconds = time.perf_counter() - within_start
+
+        td_start = time.perf_counter()
         mks = self.pmodel.getModelKeys()  # get all keys
 
         # set up transforms
@@ -88,6 +95,7 @@ class RJToyModelProposal(Proposal):
             print("Z = ", {mk: np.exp(lz) for mk, lz in self.mk_logZhat.items()})
 
         self._calibratemmmpd(mks, mmmpd, t)
+        self.td_calibration_seconds = time.perf_counter() - td_start
 
     def _calibratemmmpd(self, mks, mmmpd, t) -> None:
         raise NotImplementedError

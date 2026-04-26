@@ -14,6 +14,7 @@ from src.transforms import (
     Sigmoid,
     SinArcSinhTransform,
 )
+from src.algorithms.utils import train_with_checkpoint
 
 from .toy_proposal import RJToyModelProposal
 
@@ -115,7 +116,15 @@ class RJToyModelProposalVINF(RJToyModelProposal):
         for mk in mks:
             p = self.problem.target(k=self.getModelInt(mk))
             q0 = DiagGaussian(p.ndim)
-            self.flows[mk] = self.normalizing_flows(q0=q0, target=p)
+            folder = self.__class__.__name__
+            self.flows[mk] = train_with_checkpoint(
+                self.save_flows_dir,
+                folder,
+                mk,
+                self.normalizing_flows,
+                q0=q0,
+                target=p,
+            )
 
         if self.verbose:
             print("MK Z", self.mk_logZhat)
