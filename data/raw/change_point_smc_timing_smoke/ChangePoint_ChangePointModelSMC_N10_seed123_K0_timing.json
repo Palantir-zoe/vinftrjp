@@ -1,0 +1,8 @@
+{
+  "fixed_k": 0,
+  "n_particles": 10,
+  "seed": 123,
+  "ess_threshold": 0.5,
+  "within_model_scale": 0.35,
+  "elapsed_seconds": 0.048439199999847915
+}

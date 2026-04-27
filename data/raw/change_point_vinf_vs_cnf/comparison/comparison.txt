@@ -1,0 +1,33 @@
+[vinf_ctp]
+burn_in: 10000
+mode_k: 3
+mode_k_probability: 0.299922
+mean_acceptance_probability: 0.059443
+move_rate: 0.058923
+model_switch_rate: 0.022967
+setup_seconds: 0.397092
+within_model_calibration_seconds: 0.009850
+td_calibration_seconds: 0.151468
+rjmcmc_sampling_seconds: 1128.306533
+run_total_seconds: 1128.703625
+posterior_k: k=0:0.000000, k=1:0.065178, k=2:0.252556, k=3:0.299922, k=4:0.229089, k=5:0.089600, k=6:0.053556, k=7:0.007844, k=8:0.001256, k=9:0.000944, k=10:0.000056
+mean_change_points: 13373.50, 25425.91, 35224.65
+posterior_mean_rates: 0.008516, 0.003450, 0.003518, 0.001146
+
+[smc_cnf_ctp]
+burn_in: 10000
+mode_k: 2
+mode_k_probability: 0.328567
+mean_acceptance_probability: 0.083832
+move_rate: 0.083745
+model_switch_rate: 0.014678
+setup_seconds: 553.609465
+within_model_calibration_seconds: 0.170295
+td_calibration_seconds: 0.077238
+rjmcmc_sampling_seconds: 4146.751179
+run_total_seconds: 4700.360643
+smc_total_recorded_generation_seconds: 549.270091
+run_total_plus_smc_seconds: 5249.630734
+posterior_k: k=0:0.000000, k=1:0.009100, k=2:0.328567, k=3:0.256656, k=4:0.213411, k=5:0.115156, k=6:0.052400, k=7:0.021333, k=8:0.002178, k=9:0.000756, k=10:0.000444
+mean_change_points: 13725.88, 33053.98
+posterior_mean_rates: 0.008534, 0.003279, 0.001302

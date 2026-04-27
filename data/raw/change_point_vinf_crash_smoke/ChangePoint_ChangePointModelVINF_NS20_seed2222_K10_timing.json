@@ -1,0 +1,9 @@
+{
+  "algorithm": "vinf",
+  "calibration_source": "vinf_target",
+  "setup_seconds": 20.320919600009802,
+  "within_model_calibration_seconds": 0.005969100006041117,
+  "td_calibration_seconds": 20.13111640000716,
+  "rjmcmc_sampling_seconds": 0.13829570000234526,
+  "run_total_seconds": 20.459215300012147
+}

@@ -1,0 +1,3 @@
+mode_k: 0
+mode_k_probability: 0.856310
+mean_rates: 0.004641

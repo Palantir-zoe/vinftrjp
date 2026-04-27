@@ -1,0 +1,12 @@
+{
+  "algorithm": "cnf",
+  "calibration_source": "smc",
+  "setup_seconds": 8.908017500001733,
+  "within_model_calibration_seconds": 0.0008091999989119358,
+  "td_calibration_seconds": 8.880296200000885,
+  "rjmcmc_sampling_seconds": 0.03951020000022254,
+  "run_total_seconds": 8.947527700001956,
+  "smc_total_recorded_generation_seconds": 0.36456189999807975,
+  "smc_total_elapsed_seconds_current_run": 0.37004890000025625,
+  "run_total_plus_smc_seconds": 9.312089600000036
+}

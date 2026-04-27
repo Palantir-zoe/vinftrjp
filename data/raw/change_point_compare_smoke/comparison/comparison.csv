@@ -1,0 +1,3 @@
+algorithm,burn_in,mode_k,mode_k_probability,mean_acceptance_probability,move_rate,model_switch_rate,setup_seconds,within_model_calibration_seconds,td_calibration_seconds,rjmcmc_sampling_seconds,run_total_seconds,smc_total_recorded_generation_seconds,run_total_plus_smc_seconds,p_k_0,p_k_1
+vinf_ctp,1,1,1.000000,0.335169,0.333333,0.000000,1.600094,0.001201,1.481977,0.020928,1.621022,0.000000,1.621022,0.000000,1.000000
+smc_cnf_ctp,1,1,1.000000,0.500772,0.333333,0.000000,8.908018,0.000809,8.880296,0.039510,8.947528,0.364562,9.312090,0.000000,1.000000

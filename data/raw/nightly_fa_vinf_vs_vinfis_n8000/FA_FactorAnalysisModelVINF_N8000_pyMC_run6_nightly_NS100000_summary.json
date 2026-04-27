@@ -1,0 +1,18 @@
+{
+  "acceptance_rate": 0.2372375870770083,
+  "algorithm": "FactorAnalysisModelVINF",
+  "chain_prob_k1": 0.90322,
+  "chain_prob_k2": 0.09678,
+  "flow_device": "cuda",
+  "flow_hidden_layer_size": null,
+  "flow_num_samples": null,
+  "n_particles": 8000,
+  "n_samples": 100000,
+  "posterior_sample_generation_seconds": null,
+  "rjmcmc_sampling_seconds": 963.6214760000585,
+  "run_no": 6,
+  "runtime_seconds": 2074.413566000061,
+  "save_flows_dir": "data/flows/fa_nightly_n8000",
+  "seed": 1776286830,
+  "td_proposal_fit_or_train_seconds": 1110.7920900000026
+}

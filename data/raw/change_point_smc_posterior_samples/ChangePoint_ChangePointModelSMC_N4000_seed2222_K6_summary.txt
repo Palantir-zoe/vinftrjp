@@ -1,0 +1,5 @@
+fixed_k: 6
+n_particles: 4000
+mean_log_likelihood: -1179.979969
+mean_log_prior: -10.824821
+elapsed_seconds: 63.638916

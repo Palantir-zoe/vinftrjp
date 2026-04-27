@@ -1,0 +1,15 @@
+burn_in: 0
+mode_k: 3
+mode_k_probability: 0.306340
+mean_acceptance_probability: 0.060079
+move_rate: 0.059721
+model_switch_rate: 0.023150
+algorithm: vinf
+calibration_source: vinf_target
+setup_seconds: 0.397092
+within_model_calibration_seconds: 0.009850
+td_calibration_seconds: 0.151468
+rjmcmc_sampling_seconds: 1128.306533
+run_total_seconds: 1128.703625
+mean_change_points: 13487.73, 25544.18, 35260.25
+posterior_mean_rates: 0.008506, 0.003434, 0.003524, 0.001134

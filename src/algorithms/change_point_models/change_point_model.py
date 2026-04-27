@@ -12,12 +12,20 @@ class ChangePointModel(ParametricModelSpace):
         self.proposal_class = proposal_class
         self.problem = problem
 
-        self.k_min = 0
-        self.k_max = int(self.problem.k_max)
+        fixed_k = kwargs.get("fixed_k")
+        if fixed_k is None:
+            self.k_min = 0
+            self.k_max = int(self.problem.k_max)
+        else:
+            fixed_k = int(fixed_k)
+            if not (0 <= fixed_k <= int(self.problem.k_max)):
+                raise ValueError(f"fixed_k must be in [0, {int(self.problem.k_max)}], got {fixed_k}")
+            self.k_min = fixed_k
+            self.k_max = fixed_k
         self.indicator_name = "k"
-        self.segment_names = [f"s{i}" for i in range(self.k_max)]
+        self.segment_names = [f"s{i}" for i in range(int(self.problem.k_max))]
         # h is analytically collapsed out of the RJMCMC state.
-        self.rate_names = [f"h{i}" for i in range(self.k_max + 1)]
+        self.rate_names = [f"h{i}" for i in range(int(self.problem.k_max) + 1)]
 
         self._targets = {}
         self._stick_break = StickBreakingTransform()

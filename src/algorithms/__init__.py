@@ -1,4 +1,6 @@
 __all__ = [
+    "ChangePointModelCNF",
+    "ChangePointModelSMC",
     "ChangePointModelVINF",
     "FactorAnalysisModelAF",
     "FactorAnalysisModelLW",
@@ -19,7 +21,7 @@ __all__ = [
     "RobustBlockVSModelVINF",
 ]
 
-from .change_point_models import ChangePointModelVINF
+from .change_point_models import ChangePointModelCNF, ChangePointModelSMC, ChangePointModelVINF
 from .fa_models import (
     FactorAnalysisModelAF,
     FactorAnalysisModelLW,
@@ -40,6 +42,8 @@ from .vs_models import (
 )
 
 ALGORITHMS = {
+    "ChangePointModelCNF": ChangePointModelCNF,
+    "ChangePointModelSMC": ChangePointModelSMC,
     "ChangePointModelVINF": ChangePointModelVINF,
     "FactorAnalysisModelAF": FactorAnalysisModelAF,
     "FactorAnalysisModelLW": FactorAnalysisModelLW,

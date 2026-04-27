@@ -1,0 +1,5 @@
+algorithm,run_no,n_samples,algorithm_suffix,flow_device,flow_num_samples,flow_hidden_layer_size,flow_annealing,model2_probability_mean,model2_probability_final_running,accepted_move_rate,ess_model2_indicator
+ToyModelAF,1,10000,smoke2_,,,,,0.7659,0.7659,0.7240724072407241,277.05407877616426
+ToyModelNF,1,10000,smoke2_,,,,,0.7414,0.7414,0.7022702270227023,958.627336591051
+ToyModelPerfect,1,10000,smoke2_,,,,,0.7553,0.7553,0.6433643364336433,4899.952250737954
+ToyModelVINF,1,10000,smoke2_,cuda,64,128,True,0.7331,0.7331,0.7130713071307131,781.612730307744

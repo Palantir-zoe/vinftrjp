@@ -1,0 +1,18 @@
+{
+  "k_max": 1,
+  "n_particles": 10,
+  "seed": 123,
+  "ess_threshold": 0.5,
+  "within_model_scale": 0.35,
+  "generated_models": [
+    0,
+    1
+  ],
+  "reused_models": [],
+  "per_k_elapsed_seconds": {
+    "0": 0.048439199999847915,
+    "1": 0.31612269999823184
+  },
+  "total_elapsed_seconds_current_run": 0.37004890000025625,
+  "total_recorded_generation_seconds": 0.36456189999807975
+}

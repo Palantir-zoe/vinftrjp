@@ -1,0 +1,3 @@
+algorithm,n_runs,n_completed_runs,mean_runtime_seconds,median_runtime_seconds,max_runtime_seconds,mean_posterior_sample_generation_seconds,mean_td_proposal_fit_or_train_seconds,mean_rjmcmc_sampling_seconds,mean_acceptance_rate,mean_chain_prob_k1,mean_chain_prob_k2,mean_estimated_prob_k1,mean_estimated_prob_k2
+FactorAnalysisModelVINF,10,10,2166.403882310004,2065.1197548500495,3074.352794000064,,1180.4330353599858,985.9708469500183,0.2342160590030155,0.874941,0.12505899999999998,,
+FactorAnalysisModelVINFIS,10,10,1928.6405507899703,1928.1641462499392,1936.9118479999015,,1107.657669099979,820.9828816899914,0.5384651920321734,0.8548779999999999,0.14512200000000003,0.8948137040795594,0.10518629592045099

@@ -1,0 +1,11 @@
+n_particles: 4000
+run_no: 1
+importance_samples: 4000
+truth_k1: 0.880000
+truth_k2: 0.120000
+estimated_prob_(1,): 0.901553
+estimated_prob_(2,): 0.098447
+log_marginal_(1,): -903.451500
+log_marginal_(2,): -905.666102
+abs_error_k1: 0.021553
+abs_error_k2: 0.021553

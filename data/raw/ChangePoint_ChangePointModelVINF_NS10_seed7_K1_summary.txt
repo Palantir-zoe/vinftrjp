@@ -1,0 +1,4 @@
+mode_k: 1
+mode_k_probability: 1.000000
+mean_change_points: 11168.87
+mean_rates: 0.416526, 0.141804

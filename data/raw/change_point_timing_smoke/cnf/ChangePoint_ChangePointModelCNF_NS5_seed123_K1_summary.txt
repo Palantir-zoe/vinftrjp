@@ -1,0 +1,18 @@
+burn_in: 0
+mode_k: 1
+mode_k_probability: 1.000000
+mean_acceptance_probability: 0.171222
+move_rate: 0.000000
+model_switch_rate: 0.000000
+algorithm: cnf
+calibration_source: smc
+setup_seconds: 6.968549
+within_model_calibration_seconds: 0.000835
+td_calibration_seconds: 6.571083
+rjmcmc_sampling_seconds: 0.022190
+run_total_seconds: 6.990739
+smc_total_recorded_generation_seconds: 0.364562
+smc_total_elapsed_seconds_current_run: 0.370049
+run_total_plus_smc_seconds: 7.355301
+mean_change_points: 14387.21
+posterior_mean_rates: 0.008569, 0.002508

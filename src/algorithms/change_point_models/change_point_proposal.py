@@ -1,10 +1,14 @@
 import numpy as np
 import torch
+from nflows.distributions.normal import StandardNormal
 from scipy.special import logsumexp
 from scipy.stats import beta as beta_distribution
 from scipy.stats import multivariate_normal, norm
+import time
 
+from src.flows import ConditionalMaskedRationalQuadraticFlow
 from src.proposals import Proposal
+from src.transforms import CauchyCDF, FixedNorm
 
 from ..utils import train_with_checkpoint
 
@@ -139,7 +143,10 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
         self.exclude_concat = [self.indicator_name]
 
     def calibratemmmpd(self, mmmpd, size, t):
+        within_start = time.perf_counter()
         self.within_model_proposal.calibratemmmpd(mmmpd, size, t)
+        self.within_model_calibration_seconds = time.perf_counter() - within_start
+        td_start = time.perf_counter()
 
         self.flows = {}
         self.mk_logZhat = {}
@@ -161,6 +168,7 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
                 self.flows[mk] = self.shared_flow
             if self.between_model_move == "semantic_learned":
                 self._fit_semantic_rho_models()
+            self.td_calibration_seconds = time.perf_counter() - td_start
             return
 
         for mk in mklist:
@@ -182,6 +190,7 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
 
         if self.between_model_move == "semantic_learned":
             self._fit_semantic_rho_models()
+        self.td_calibration_seconds = time.perf_counter() - td_start
 
     def transformToBase(self, inputs, mk):
         if self.use_conditional_shared_flow:
@@ -708,3 +717,135 @@ class RJFlowGlobalChangePointProposalVINF(Proposal):
             prop_ids[mk_row_idx] = mk_prop_ids
 
         return prop_theta, logpqratio, prop_ids
+
+
+class RJFlowGlobalChangePointProposalCNF(RJFlowGlobalChangePointProposalVINF):
+    """Sample-trained conditional shared flow for change-point proposals."""
+
+    def __init__(self, *, problem, indicator_name, segment_names, within_model_proposal, **kwargs):
+        super().__init__(
+            normalizing_flows=None,
+            problem=problem,
+            indicator_name=indicator_name,
+            segment_names=segment_names,
+            within_model_proposal=within_model_proposal,
+            **kwargs,
+        )
+
+    def calibratemmmpd(self, mmmpd, size, t):
+        within_start = time.perf_counter()
+        self.within_model_proposal.calibratemmmpd(mmmpd, size, t)
+        self.within_model_calibration_seconds = time.perf_counter() - within_start
+
+        if not self.use_conditional_shared_flow:
+            raise NotImplementedError(
+                "RJFlowGlobalChangePointProposalCNF currently only supports the shared conditional flow setting."
+            )
+
+        td_start = time.perf_counter()
+        self.flows = {}
+        self.mk_logZhat = {}
+        mklist = self.pmodel.getModelKeys()
+
+        theta, theta_w = mmmpd.getOriginalParticleDensityForTemperature(t, resample=False)
+        model_key_indices, _ = self.pmodel.enumerateModels(theta)
+
+        x_aug_list = []
+        context_list = []
+        context_mask_list = []
+        weight_list = []
+
+        observed_models = [mk for mk in mklist if mk in model_key_indices]
+        if not observed_models:
+            raise RuntimeError("No model-specific calibration draws were available for CNF training.")
+
+        per_model_mass = 1.0 / len(observed_models)
+        for mk in observed_models:
+            idx = model_key_indices[mk]
+            mk_theta = theta[idx]
+            mk_active = self.concatParameters(mk_theta, mk)
+            k = int(mk[0])
+            inactive_dim = self.problem.k_max - k
+
+            if inactive_dim > 0:
+                inactive = norm(0, self.aux_scale).rvs((mk_theta.shape[0], inactive_dim))
+                inactive = np.asarray(inactive, dtype=np.float64).reshape(mk_theta.shape[0], inactive_dim)
+                x_aug = np.column_stack([mk_active, inactive])
+            else:
+                x_aug = mk_active.copy()
+
+            context = self._context_for_model(mk, mk_theta.shape[0], dtype=torch.float32).detach().cpu().numpy()
+            context_mask = ~context.astype(bool)
+
+            mk_log_w = theta_w[idx]
+            mk_weights = np.exp(mk_log_w - logsumexp(mk_log_w)) * per_model_mass
+
+            x_aug_list.append(np.asarray(x_aug, dtype=np.float32))
+            context_list.append(np.asarray(context, dtype=np.float32))
+            context_mask_list.append(context_mask)
+            weight_list.append(np.asarray(mk_weights, dtype=np.float64))
+
+        x_aug = np.vstack(x_aug_list)
+        context_inputs = np.vstack(context_list)
+        context_mask = np.vstack(context_mask_list)
+        input_weights = np.concatenate(weight_list)
+        input_weights = input_weights / input_weights.sum()
+        x_aug_t = torch.tensor(x_aug, dtype=torch.float32)
+        input_weights_t = torch.tensor(input_weights, dtype=torch.float32)
+
+        folder = f"{self.__class__.__name__}_collapsed_ctp_cnf_v1"
+        self.shared_flow = train_with_checkpoint(
+            self.save_flows_dir,
+            folder,
+            ("shared", self.problem.k_max),
+            ConditionalMaskedRationalQuadraticFlow.factory,
+            x_aug,
+            context_inputs,
+            context_mask,
+            aux_dist=torch.distributions.normal.Normal(0.0, self.aux_scale),
+            base_dist=StandardNormal((self.problem.k_max,)),
+            boxing_transform=CauchyCDF(),
+            initial_transform=FixedNorm(x_aug_t, input_weights_t),
+            input_weights=input_weights,
+        )
+        self.conditional_target = None
+
+        for mk in mklist:
+            self.mk_logZhat[mk] = -np.log(len(mklist))
+            self.flows[mk] = self.shared_flow
+        self.td_calibration_seconds = time.perf_counter() - td_start
+
+    def _transform_to_base_matrix(self, inputs, mk):
+        x_aug, inactive = self._pack_augmented_parameters(inputs, mk)
+        context = self._context_for_model(mk, inputs.shape[0], dtype=torch.float32)
+        xx, logdet = self.shared_flow._transform.inverse(
+            torch.tensor(x_aug, dtype=torch.float32),
+            context=context,
+        )
+        xx_np = np.asarray(xx.detach().cpu().tolist(), dtype=np.float64)
+        logdet_np = np.asarray(logdet.detach().cpu().tolist(), dtype=np.float64)
+        inactive_log_prob = self._reference_log_prob_np(inactive)
+        return xx_np, logdet_np, inactive_log_prob
+
+    def _transform_from_base_matrix(self, x, inputs, mk):
+        context = self._context_for_model(mk, x.shape[0], dtype=torch.float32)
+        xx, logdet = self.shared_flow._transform.forward(
+            torch.tensor(x, dtype=torch.float32),
+            context=context,
+        )
+        xx_np = np.asarray(xx.detach().cpu().tolist(), dtype=np.float64)
+        logdet_np = np.asarray(logdet.detach().cpu().tolist(), dtype=np.float64)
+        prop_theta, inactive = self._unpack_augmented_parameters(xx_np, inputs, mk)
+        inactive_log_prob = self._reference_log_prob_np(inactive)
+        return prop_theta, logdet_np, inactive_log_prob
+
+    def sample_model_parameters_from_flow(self, mk, size):
+        theta = np.zeros((size, self.pmodel.dim()), dtype=np.float64)
+        theta = self.setVariable(theta, self.indicator_name, np.full(size, int(mk[0])))
+
+        context = self._context_for_model(mk, size, dtype=torch.float32)
+        base_noise = torch.randn((size, self.problem.k_max), dtype=torch.float32)
+        samples, _ = self.shared_flow._transform.inverse(base_noise, context=context)
+        x_aug = np.asarray(samples.detach().cpu().tolist(), dtype=np.float64)
+        theta, _ = self._unpack_augmented_parameters(x_aug, theta, mk)
+        return self.pmodel.sanitise(theta)

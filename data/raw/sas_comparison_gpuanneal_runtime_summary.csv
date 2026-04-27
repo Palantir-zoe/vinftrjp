@@ -1,0 +1,5 @@
+algorithm,n_runs,n_fresh_runs,mean_runtime_seconds,median_runtime_seconds,max_runtime_seconds,mean_model2_probability,mean_accepted_move_rate,mean_ess_model2_indicator
+ToyModelAF,10,10,,,,0.7424,0.7247124712471248,234.6216262645096
+ToyModelNF,10,10,,,,0.75258,0.7072907290729072,1063.440303057114
+ToyModelPerfect,10,10,,,,0.7502600000000001,0.6360636063606362,4923.286401885394
+ToyModelVINF,10,10,,,,0.74006,0.7206020602060207,955.2574071863831

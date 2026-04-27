@@ -1,0 +1,8 @@
+burn_in: 0
+mode_k: 2
+mode_k_probability: 1.000000
+mean_acceptance_probability: 0.009906
+move_rate: 0.000000
+model_switch_rate: 0.000000
+mean_change_points: 14446.17, 35409.82
+posterior_mean_rates: 0.008535, 0.002977, 0.000878

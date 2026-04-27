@@ -1,4 +1,3 @@
-__all__ = ["ChangePointModelVINF"]
+__all__ = ["ChangePointModelCNF", "ChangePointModelSMC", "ChangePointModelVINF"]
 
-from .change_point_models import ChangePointModelVINF
-
+from .change_point_models import ChangePointModelCNF, ChangePointModelSMC, ChangePointModelVINF
